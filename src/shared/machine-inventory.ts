@@ -57,6 +57,17 @@ export type MachineProviderSnapshot = MachineProviderInventory & {
   name: string
 }
 
+/** Failures keep their provider code; a thrown IPC or RPC error would arrive as text only. */
+export type MachineActionResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; code: MachineProviderErrorCode; message: string }
+
+export type MachineTarget = { providerKey: MachineProviderKey; machineId: string }
+
+export type MachineConnection =
+  | { kind: 'ssh'; sshTargetId: string; environmentId?: string }
+  | { kind: 'orca-server'; runtimeEnvironmentId: string }
+
 export const MACHINE_CREATE_RECONCILE_WINDOW_MS = 15 * 60_000
 
 export function machineProviderKey(pluginKey: string, providerId: string): MachineProviderKey {

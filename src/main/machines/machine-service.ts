@@ -4,6 +4,7 @@ import {
   type ProviderMachine
 } from '../../shared/machine-provider-protocol'
 import type {
+  MachineConnection,
   MachineProviderKey,
   MachineProviderSnapshot,
   MachineRecord
@@ -38,10 +39,6 @@ const FAILURE_BACKOFF_MS = [30_000, 120_000, 600_000]
 
 export type { MachineCreateParams } from './machine-create'
 export type { MachineProviderEntry } from './machine-provider-client'
-
-export type MachineConnectResult =
-  | { kind: 'ssh'; sshTargetId: string; environmentId?: string }
-  | { kind: 'orca-server'; runtimeEnvironmentId: string }
 
 export type MachineServiceDeps = MachineProviderClientDeps & {
   sshTargets: MachineSshTargets
@@ -138,7 +135,7 @@ export class MachineService {
     return this.mutate(providerKey, machineId, 'delete')
   }
 
-  async connect(providerKey: MachineProviderKey, machineId: string): Promise<MachineConnectResult> {
+  async connect(providerKey: MachineProviderKey, machineId: string): Promise<MachineConnection> {
     const provider = this.client.provider(providerKey)
     const previous = findRecord(this.client.inventory(providerKey), machineId)
     const record =
