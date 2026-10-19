@@ -1,54 +1,62 @@
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
+import { hostKeyPolicyForOwner } from '../ssh-host-key-decision'
 import {
-  getLegacyManagedOrcadOwnerEnvironmentId,
-  isEphemeralRuntimeSshOwner,
-  managedOrcadServerName
-} from '../../../shared/managed-orcad-ssh-owner'
-import type { SshTarget } from '../../../shared/ssh-types'
-import { normalizeSshTarget } from '../../persistence/leasing-ssh-ptys/ssh-normalization'
-import { isRuntimeOwnedSshTarget } from './ssh-connection-store'
+  previousGetLegacyManagedOrcadOwnerEnvironmentId,
+  previousIsEphemeralRuntimeSshOwner,
+  previousIsRuntimeOwnedSshTarget,
+  previousManagedOrcadServerName
+} from './ssh-target-owner.previous-release.test-fixture'
 
-// Persisted by this build. Builds before the machine owner only knew `on-demand-runtime` and read
-// owner.runtimeId unguarded, so the owner must keep that field for a downgrade.
-const PERSISTED_MACHINE_TARGET: SshTarget = {
-  id: 'machine-0123456789abcdef0123',
-  label: 'omarchy-dev',
-  host: 'omarchy',
-  port: 42200,
-  username: 'dev',
-  configHost: 'omarchy',
-  source: 'manual',
-  generation: 7,
-  owner: {
-    type: 'machine',
-    runtimeId: 'machine-0123456789abcdef0123',
-    providerKey: 'plugin:acme.omarchy/omarchy',
-    machineId: 'sbx-1',
-    hostKeyFingerprints: [`SHA256:${'A'.repeat(43)}`]
+// A machine-owned target exactly as this build persists it.
+const PERSISTED = `{
+  "id": "machine-0123456789abcdef0123",
+  "label": "omarchy-dev",
+  "host": "omarchy",
+  "port": 42200,
+  "username": "dev",
+  "configHost": "omarchy",
+  "source": "manual",
+  "generation": 7,
+  "owner": {
+    "type": "machine",
+    "runtimeId": "machine-0123456789abcdef0123",
+    "providerKey": "plugin:acme.omarchy/omarchy",
+    "machineId": "sbx-1",
+    "hostKeys": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"]
   }
-}
+}`
 
-describe('machine-owned SSH targets on load', () => {
-  it('survive normalization with the owner intact', () => {
-    expect(normalizeSshTarget(PERSISTED_MACHINE_TARGET).owner).toEqual(
-      PERSISTED_MACHINE_TARGET.owner
-    )
+// What the previous release's loader assumed without checking: owner.runtimeId is a string.
+const previousReleaseRow = z
+  .object({
+    label: z.string(),
+    owner: z.object({ type: z.string(), runtimeId: z.string() }).passthrough()
+  })
+  .passthrough()
+
+describe('a machine-owned target loaded by the previous release', () => {
+  const row = previousReleaseRow.parse(JSON.parse(PERSISTED))
+
+  it('stays hidden and is pinned normally rather than trusted as an ephemeral VM', () => {
+    expect(previousIsRuntimeOwnedSshTarget(row)).toBe(true)
+    expect(previousIsEphemeralRuntimeSshOwner(row.owner)).toBe(false)
+    expect(previousGetLegacyManagedOrcadOwnerEnvironmentId(row.owner)).toBeNull()
+    expect(previousManagedOrcadServerName(row)).toBe('omarchy-dev')
   })
 
-  it('stay hidden from SSH host lists and keep normal host-key pinning', () => {
-    const target = normalizeSshTarget(PERSISTED_MACHINE_TARGET)
-    expect(isRuntimeOwnedSshTarget(target)).toBe(true)
-    // Not ephemeral: an unknown key is checked and recorded instead of accepted silently.
-    expect(isEphemeralRuntimeSshOwner(target.owner)).toBe(false)
-    expect(getLegacyManagedOrcadOwnerEnvironmentId(target.owner)).toBeNull()
-    expect(managedOrcadServerName(target)).toBe('omarchy-dev')
-  })
-
-  it('read safely through the pre-machine owner shape an older build expects', () => {
-    // What an older build sees: only `type` and `runtimeId` are typed, and both are strings.
-    const legacyView: { type: string; runtimeId: string } | undefined =
-      PERSISTED_MACHINE_TARGET.owner
-    expect(legacyView?.runtimeId.startsWith('managed-orcad:')).toBe(false)
-    expect(legacyView?.type).not.toBe('on-demand-runtime')
+  it('is provider-pinned by this build', () => {
+    const current = z
+      .object({
+        owner: z.object({
+          type: z.literal('machine'),
+          runtimeId: z.string(),
+          providerKey: z.string(),
+          machineId: z.string(),
+          hostKeys: z.array(z.string())
+        })
+      })
+      .parse(JSON.parse(PERSISTED))
+    expect(hostKeyPolicyForOwner(current.owner).kind).toBe('provider-pinned')
   })
 })
