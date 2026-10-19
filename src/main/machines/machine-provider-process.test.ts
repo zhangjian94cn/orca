@@ -138,7 +138,15 @@ describe('runMachineProviderVerb', () => {
 
   it('never spawns for a machine id that could inject into the remote shell line', async () => {
     const run = stubRun({})
-    for (const machineId of ['a;touch x', '$(id)', '-oProxyCommand=x', 'a b', '']) {
+    // Proven live: ssh re-joins argv, so this id would run `touch` on the provider host.
+    for (const machineId of [
+      'x;touch /tmp/pwn',
+      'a;touch x',
+      '$(id)',
+      '-oProxyCommand=x',
+      'a b',
+      ''
+    ]) {
       await expect(
         runMachineProviderVerb(fakeArgs({ verb: 'wake', machineId, run }))
       ).rejects.toThrow('Invalid machine id')
