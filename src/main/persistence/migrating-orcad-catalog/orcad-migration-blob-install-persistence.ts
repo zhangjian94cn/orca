@@ -7,7 +7,10 @@ import type { StoreRuntimeState } from '../loading-store/store-runtime-state'
 import { findOrcadMigrationImportReceipt } from './orcad-catalog-receipt-ledger'
 import { installOrcadMigrationReceivedBlobs } from './orcad-migration-blob-installers'
 import { listOrcadMigrationReceivedBlobNames } from './orcad-migration-blob-staging'
-import type { OrcadMigrationRequestIdentity } from './orcad-migration-staged-file'
+import {
+  orcadMigrationStagingKey,
+  type OrcadMigrationRequestIdentity
+} from './orcad-migration-staged-file'
 
 type OrcadMigrationBlobInstallRuntime = Pick<
   StoreRuntimeState,
@@ -23,10 +26,20 @@ type InstallOptions = ClockOptions & {
   /** The runtime's live-shell check; a moved history waits while a shell runs in its worktree. */
   worktreeHasLiveShells?: (worktreeId: string) => boolean
 }
+type CommitInstallOptions = InstallOptions & {
+  /** Only the durable commit passes it, after its flush resolved. */
+  commitFlushed?: true
+}
+type PendingInstallOptions = InstallOptions & {
+  /** Only store load passes it: every receipt it just read came from disk. */
+  receiptsLoadedFromDisk?: true
+}
 
 const orcadMigrationBlobInstallContext = Symbol('OrcadMigrationBlobInstallPersistence')
 type OrcadMigrationBlobInstallContext = {
   runtime: OrcadMigrationBlobInstallRuntime
+  /** Staging keys of commits known durable; an in-memory receipt alone may never reach disk. */
+  flushedCommits: Set<string>
 }
 
 /** The destination's committed migration blobs, installed into host-local state and consumed. */
@@ -34,7 +47,7 @@ export class OrcadMigrationBlobInstallPersistence {
   readonly [orcadMigrationBlobInstallContext]: OrcadMigrationBlobInstallContext
 
   constructor(runtime: OrcadMigrationBlobInstallRuntime) {
-    this[orcadMigrationBlobInstallContext] = { runtime }
+    this[orcadMigrationBlobInstallContext] = { runtime, flushedCommits: new Set() }
   }
 
   /**
@@ -44,27 +57,32 @@ export class OrcadMigrationBlobInstallPersistence {
    */
   installOrcadMigrationReceivedBlobs(
     manifest: OrcadMigrationManifest,
-    options: InstallOptions = {}
+    options: CommitInstallOptions = {}
   ): void {
-    const receipt = findOrcadMigrationImportReceipt(
-      this[orcadMigrationBlobInstallContext].runtime.state,
-      manifest
-    )
+    const context = this[orcadMigrationBlobInstallContext]
+    const receipt = findOrcadMigrationImportReceipt(context.runtime.state, manifest)
     if (receipt?.manifestSha256 !== manifest.manifestSha256) {
       return
     }
-    installCommitted(this[orcadMigrationBlobInstallContext].runtime, manifest, options)
+    if (options.commitFlushed) {
+      context.flushedCommits.add(orcadMigrationStagingKey(manifest))
+    }
+    installCommitted(context, manifest, options)
   }
 
-  /** Finishes installs a crash or failed write left behind; every receipt on disk is durable. */
-  installPendingOrcadMigrationReceivedBlobs(options: InstallOptions = {}): void {
-    const { runtime } = this[orcadMigrationBlobInstallContext]
+  /** Finishes installs a crash or failed write left behind. */
+  installPendingOrcadMigrationReceivedBlobs(options: PendingInstallOptions = {}): void {
+    const context = this[orcadMigrationBlobInstallContext]
+    const { runtime } = context
     for (const receipt of [
       ...(runtime.state.orcadMigrationImportReceipts ?? []),
       ...(runtime.state.orcadMigrationEvictedReceipts ?? [])
     ]) {
+      if (options.receiptsLoadedFromDisk) {
+        context.flushedCommits.add(orcadMigrationStagingKey(receipt))
+      }
       try {
-        installCommitted(runtime, receipt, options)
+        installCommitted(context, receipt, options)
       } catch (error) {
         console.error(
           `[orcad-migration] installing received blobs for ${receipt.migrationId} failed:`,
@@ -123,7 +141,7 @@ export class OrcadMigrationBlobInstallPersistence {
 }
 
 function installCommitted(
-  runtime: OrcadMigrationBlobInstallRuntime,
+  { runtime, flushedCommits }: OrcadMigrationBlobInstallContext,
   migration: OrcadMigrationRequestIdentity,
   options: InstallOptions
 ): void {
@@ -136,6 +154,7 @@ function installCommitted(
     worktreeHasLiveShells: options.worktreeHasLiveShells,
     deferredShellHistoryWorktreeIds: runtime.deferredShellHistoryWorktreeIds,
     paneWorktreeId: (paneKey) => findPaneWorktreeId(runtime.state, paneKey),
+    commitFlushed: flushedCommits.has(orcadMigrationStagingKey(migration)),
     now: clock(options)
   })
 }

@@ -50,6 +50,7 @@ import {
   stageOrcadMigrationBlobChunk
 } from './orcad-migration-blob-staging'
 import { assertOrcadMigrationBlobContentsValid } from './orcad-migration-blob-installers'
+import { readDeclaredOrcadMigrationEditorDrafts } from './orcad-destination-editor-drafts'
 
 type OrcadCatalogImportRuntime = Pick<
   StoreRuntimeState,
@@ -159,7 +160,7 @@ export class OrcadCatalogImportPersistence {
     if (current.state !== 'staged') {
       throw new Error('orcad_migration_catalog_not_staged')
     }
-    const prepared = prepareOrcadMigrationCatalog(manifest, context.runtime.state)
+    let prepared = prepareOrcadMigrationCatalog(manifest, context.runtime.state)
     assertOrcadMigrationSnapshotsReady(manifest, context.runtime.terminalScrollbackSnapshotStorage)
     if (options.expectedBlobs) {
       assertOrcadMigrationBlobSetMatches(
@@ -170,6 +171,14 @@ export class OrcadCatalogImportPersistence {
     }
     assertOrcadMigrationBlobsReady(manifest, context.runtime.orcadMigrationBlobRoot)
     assertOrcadMigrationBlobContentsValid(manifest, context.runtime.orcadMigrationBlobRoot)
+    // Before any blob moves, so a refused draft or conflict leaves staging as it was.
+    const editorDrafts = readDeclaredOrcadMigrationEditorDrafts(
+      manifest,
+      context.runtime.orcadMigrationBlobRoot
+    )
+    if (editorDrafts) {
+      prepared = prepareOrcadMigrationCatalog(manifest, context.runtime.state, editorDrafts)
+    }
     commitOrcadMigrationSnapshots(manifest, context.runtime.terminalScrollbackSnapshotStorage)
     commitOrcadMigrationBlobs(manifest, context.runtime.orcadMigrationBlobRoot)
     const receipt = commitPreparedCatalog(context, manifest, prepared, options.now)

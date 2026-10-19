@@ -19,7 +19,8 @@ import { ORCAD_MIGRATION_BLOB_CHANNEL_RUNTIME_CAPABILITY } from '../orcad-runtim
 export const ORCAD_MIGRATION_BLOB_KINDS = [
   'terminal-restore-hints',
   'shell-history',
-  'agent-session-records'
+  'agent-session-records',
+  'editor-drafts'
 ] as const
 
 export type OrcadMigrationBlobKind = (typeof ORCAD_MIGRATION_BLOB_KINDS)[number]
@@ -54,6 +55,12 @@ export const ORCAD_MIGRATION_BLOB_KIND_CONTRACTS: Record<
     key: /^[a-z0-9][a-z0-9_-]{0,127}$/,
     maxBytes: 64 * MIB,
     capability: 'orcad.migration-blob.agent-session-records.v1'
+  },
+  // Every shed unsaved editor buffer of the migration in one document, named by the manifest.
+  'editor-drafts': {
+    key: /^drafts$/,
+    maxBytes: 64 * MIB,
+    capability: 'orcad.migration-blob.editor-drafts.v1'
   }
 }
 
@@ -259,7 +266,8 @@ export function parseOrcadMigrationBlobChunkResult(
 /** Kinds this build's destination installs after commit; each is added with its installer. */
 export const ORCAD_MIGRATION_INSTALLABLE_BLOB_KINDS: readonly OrcadMigrationBlobKind[] = [
   'terminal-restore-hints',
-  'shell-history'
+  'shell-history',
+  'editor-drafts'
 ]
 
 export function advertisedOrcadMigrationBlobCapabilities(): string[] {

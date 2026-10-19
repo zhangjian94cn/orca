@@ -3,10 +3,11 @@
  * commits, and an installer after the commit is durable that moves the received blob into live
  * state and deletes it. Kinds without an installer are not advertised, so none arrive.
  */
-import { readFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { OrcadMigrationBlobKind } from '../../../shared/orcad-migration/orcad-migration-blob-transfer'
 import type { OrcadMigrationManifest } from '../../../shared/orcad-migration/orcad-migration-manifest'
+import { ORCAD_MIGRATION_EDITOR_DRAFTS_KEY } from '../../../shared/orcad-migration/orcad-migration-editor-drafts'
 import {
   ORCAD_MIGRATION_TERMINAL_RESTORE_HINTS_KEY,
   parseOrcadMigrationTerminalRestoreHintsText,
@@ -89,6 +90,11 @@ export type OrcadMigrationBlobInstall = {
   deferredShellHistoryWorktreeIds: Set<string>
   /** The worktree that owns the pane on this host, or null when the pane is not here. */
   paneWorktreeId: (paneKey: string) => string | null
+  /**
+   * Whether this commit's receipt is known to be on disk. The drafts already live in the committed
+   * session, so their received file is only the retry's copy until that session is durable.
+   */
+  commitFlushed: boolean
   now: number
 }
 
@@ -101,7 +107,11 @@ export type OrcadMigrationBlobInstall = {
 export function installOrcadMigrationReceivedBlobs(install: OrcadMigrationBlobInstall): void {
   let firstError: unknown = null
   // One kind's failure must not hold back the others; each keeps its own blobs for the retry.
-  for (const installKind of [installTerminalRestoreHints, installShellHistory]) {
+  for (const installKind of [
+    installTerminalRestoreHints,
+    installShellHistory,
+    releaseEditorDrafts
+  ]) {
     try {
       installKind(install)
     } catch (error) {
@@ -126,6 +136,23 @@ function installShellHistory(install: OrcadMigrationBlobInstall): void {
     deferredWorktreeIds: install.deferredShellHistoryWorktreeIds,
     now: install.now
   })
+}
+
+// A state query can run installers off an in-memory receipt whose flush failed; a retry after a
+// restart then re-applies the drafts from this file, so it must outlive any unconfirmed commit.
+function releaseEditorDrafts(install: OrcadMigrationBlobInstall): void {
+  if (!install.commitFlushed) {
+    return
+  }
+  const path = getOrcadMigrationReceivedBlobPath(install.root, install.migration, {
+    blobKind: 'editor-drafts',
+    key: ORCAD_MIGRATION_EDITOR_DRAFTS_KEY
+  })
+  if (!existsSync(path)) {
+    return
+  }
+  rmSync(path, { force: true })
+  syncDirectoryDurablySync(dirname(path))
 }
 
 function installTerminalRestoreHints(install: OrcadMigrationBlobInstall): void {
