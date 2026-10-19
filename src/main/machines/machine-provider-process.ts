@@ -160,8 +160,14 @@ function parseResponse(
     if (response.kind === 'error') {
       return response
     }
-  } catch {
-    // Fall through to stderr classification.
+  } catch (error) {
+    // A well-formed answer from the wrong account or a newer protocol is not a transport failure.
+    if (
+      error instanceof MachineProviderError &&
+      (error.code === 'context-mismatch' || error.code === 'protocol-unsupported')
+    ) {
+      throw error
+    }
   }
   if (AUTH_REQUIRED_STDERR.test(stderr)) {
     throw new MachineProviderError('auth-required', lastLine(stderr))

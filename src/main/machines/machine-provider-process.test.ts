@@ -107,6 +107,15 @@ describe('runMachineProviderVerb', () => {
     expect(error.code).toBe('not-found')
   })
 
+  it('keeps a wrong-account error from a failing exit as a context mismatch', async () => {
+    const error = await rejection(
+      runMachineProviderVerb(
+        fakeArgs({ verb: 'get', machineId: 'missing', contextId: 'fake:someone-else' })
+      )
+    )
+    expect(error.code).toBe('context-mismatch')
+  })
+
   it('reports a cancelled run as cancelled', async () => {
     const controller = new AbortController()
     const pending = runMachineProviderVerb(fakeArgs({ mode: 'hang', signal: controller.signal }))
