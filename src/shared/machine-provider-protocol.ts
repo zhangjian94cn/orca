@@ -62,6 +62,11 @@ const projectRoot = z
   .max(4096)
   .refine((value) => isRuntimePathAbsolute(value), 'must be an absolute path')
 const hostKeyFingerprint = z.string().regex(/^SHA256:[A-Za-z0-9+/]{43}=?$/)
+// "<type> <base64>"; system OpenSSH can only pin a key it can write into known_hosts.
+const hostPublicKey = z
+  .string()
+  .max(16 * 1024)
+  .regex(/^(?:ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)) [A-Za-z0-9+/]+={0,2}$/)
 
 const sshAccessSchema = z
   .object({
@@ -72,7 +77,8 @@ const sshAccessSchema = z
     projectRoot,
     configHost: sshToken.optional(),
     jumpHost: sshToken.optional(),
-    hostKeyFingerprints: z.array(hostKeyFingerprint).min(1).max(16).optional()
+    hostKeyFingerprints: z.array(hostKeyFingerprint).min(1).max(16).optional(),
+    hostKeys: z.array(hostPublicKey).min(1).max(16).optional()
   })
   .strict()
 

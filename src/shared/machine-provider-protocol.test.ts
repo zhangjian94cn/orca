@@ -70,6 +70,8 @@ describe('parseMachineProviderResponse', () => {
     ['a relative projectRoot', accessWith({ projectRoot: 'src' })],
     ['a proxyCommand', accessWith({ proxyCommand: 'nc %h %p' })],
     ['a malformed fingerprint', accessWith({ hostKeyFingerprints: ['MD5:aa'] })],
+    ['a host key with a trailing comment', accessWith({ hostKeys: ['ssh-ed25519 AAAA x@y'] })],
+    ['a host key option line', accessWith({ hostKeys: ['@cert-authority * ssh-ed25519 AAAA'] })],
     ['access while sleeping', { state: 'sleeping' }],
     ['an unknown lifetime', { lifetime: 'long-lived' }],
     ['an id with shell metacharacters', { id: 'm;1' }]
