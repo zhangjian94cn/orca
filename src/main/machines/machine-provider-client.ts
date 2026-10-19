@@ -9,6 +9,7 @@ import {
 import type {
   MachineInventoryStore,
   MachineProviderInventory,
+  MachineProgressEvent,
   MachineProviderKey,
   MachineProviderSnapshot
 } from '../../shared/machine-inventory'
@@ -25,6 +26,7 @@ export type MachineProviderClientDeps = {
   userDataPath: string
   listProviders: () => readonly MachineProviderEntry[]
   onChanged?: (snapshot: MachineProviderSnapshot) => void
+  onProgress?: (event: MachineProgressEvent) => void
   runVerb?: typeof runMachineProviderVerb
   now?: () => number
 }
@@ -34,6 +36,7 @@ export type MachineProviderCallArgs = {
   operationId?: string
   params?: Record<string, unknown>
   signal?: AbortSignal
+  onStderr?: (chunk: string) => void
 }
 
 /** Runs provider verbs with the stored account context and owns the persisted inventory. */
@@ -88,6 +91,28 @@ export class MachineProviderClient {
       name: provider.name,
       machines: [...inventory.machines]
     }
+  }
+
+  /** A stderr sink tagged for the UI action that asked for it; none without an operationId. */
+  progress(
+    provider: MachineProviderEntry,
+    verb: MachineProgressEvent['verb'],
+    operationId: string | undefined,
+    machineId?: string
+  ): ((chunk: string) => void) | undefined {
+    const onProgress = this.deps.onProgress
+    if (!onProgress || operationId === undefined) {
+      return undefined
+    }
+    return (chunk) =>
+      onProgress({
+        operationId,
+        providerKey: provider.providerKey,
+        verb,
+        stream: 'stderr',
+        chunk,
+        ...(machineId !== undefined ? { machineId } : {})
+      })
   }
 
   now(): number {
@@ -165,7 +190,8 @@ export class MachineProviderClient {
         ...(args.machineId !== undefined ? { machineId: args.machineId } : {}),
         ...(contextId !== undefined ? { contextId } : {}),
         ...(args.params ? { params: args.params } : {}),
-        ...(args.signal ? { signal: args.signal } : {})
+        ...(args.signal ? { signal: args.signal } : {}),
+        ...(args.onStderr ? { onStderr: args.onStderr } : {})
       })
     } catch (error) {
       // A sign-in change is exactly when the account must be asked again.

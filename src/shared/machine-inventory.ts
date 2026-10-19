@@ -70,6 +70,16 @@ export type MachineConnection =
   | { kind: 'ssh'; sshTargetId: string; environmentId?: string }
   | { kind: 'orca-server'; runtimeEnvironmentId: string }
 
+/** One provider stderr chunk for an action the UI started; stdout is never forwarded. */
+export type MachineProgressEvent = {
+  operationId: string
+  providerKey: MachineProviderKey
+  machineId?: string
+  verb: 'create' | 'wake' | 'connect'
+  stream: 'stderr'
+  chunk: string
+}
+
 export const MACHINE_CREATE_RECONCILE_WINDOW_MS = 15 * 60_000
 
 export function machineProviderKey(pluginKey: string, providerId: string): MachineProviderKey {

@@ -5,9 +5,14 @@ import {
   type MachineLifetime,
   type MachineProviderCapabilities
 } from '../../shared/machine-provider-protocol'
-import type { MachineProviderKey, MachineRecord } from '../../shared/machine-inventory'
+import {
+  MACHINE_CREATE_RECONCILE_WINDOW_MS,
+  type MachineProviderKey,
+  type MachineRecord
+} from '../../shared/machine-inventory'
 import { applyMachine, dropPendingCreate } from './machine-inventory-records'
 import type { MachineProviderClient, MachineProviderEntry } from './machine-provider-client'
+import { pollWhileMachineState } from './machine-state-polling'
 
 const CANCEL_RECONCILE_DELAYS_MS = [0, 10_000, 60_000]
 
@@ -28,8 +33,15 @@ export class MachineCreateFlow {
 
   constructor(
     private readonly client: MachineProviderClient,
-    private readonly refresh: (providerKey: MachineProviderKey) => Promise<unknown>,
-    private readonly delay: (ms: number) => Promise<void>
+    private readonly deps: {
+      refresh: (providerKey: MachineProviderKey) => Promise<unknown>
+      read: (
+        providerKey: MachineProviderKey,
+        machineId: string,
+        onStderr?: (chunk: string) => void
+      ) => Promise<MachineRecord>
+      delay: (ms: number) => Promise<void>
+    }
   ) {}
 
   /** Single-flight per operationId: a retried request joins the running create. */
@@ -56,10 +68,11 @@ export class MachineCreateFlow {
   ): Promise<MachineRecord> {
     const provider = this.client.provider(providerKey)
     assertCreateParams(await this.client.capabilities(provider), params)
+    const startedAt = this.client.now()
     this.client.commit(provider, (inventory) =>
       inventory.pendingCreates.push({
         operationId,
-        startedAt: this.client.now(),
+        startedAt,
         name: params.name,
         lifetime: params.lifetime
       })
@@ -67,15 +80,17 @@ export class MachineCreateFlow {
     const controller = new AbortController()
     this.controllers.set(operationId, controller)
     try {
+      const onStderr = this.client.progress(provider, 'create', operationId)
       const machine = await this.client.callForMachine(provider, 'create', {
         operationId,
         params: { ...params },
-        signal: controller.signal
+        signal: controller.signal,
+        onStderr
       })
       if (!isConfirmedMachineTransition('create', machine.state)) {
         throw new MachineProviderError('invalid-response', `create reported ${machine.state}.`)
       }
-      return this.client.commit(provider, (inventory) => {
+      const created = this.client.commit(provider, (inventory) => {
         dropPendingCreate(inventory, operationId)
         return applyMachine(
           inventory,
@@ -83,6 +98,13 @@ export class MachineCreateFlow {
           { ...machine, creatingOperationId: operationId },
           this.client.now()
         )
+      })
+      // Resolves once the machine runs, so a created machine always has access.
+      return pollWhileMachineState(created, 'creating', {
+        read: () => this.deps.read(providerKey, created.id, onStderr),
+        delay: this.deps.delay,
+        now: () => this.client.now(),
+        deadline: startedAt + MACHINE_CREATE_RECONCILE_WINDOW_MS
       })
     } catch (error) {
       if (!isUnknownOutcome(error)) {
@@ -114,7 +136,7 @@ export class MachineCreateFlow {
     provider: MachineProviderEntry,
     operationId: string
   ): Promise<MachineRecord | null> {
-    await this.refresh(provider.providerKey)
+    await this.deps.refresh(provider.providerKey)
     return (
       this.client
         .inventory(provider.providerKey)
@@ -131,7 +153,7 @@ export class MachineCreateFlow {
   ): Promise<void> {
     let elapsed = 0
     for (const at of CANCEL_RECONCILE_DELAYS_MS) {
-      await this.delay(at - elapsed)
+      await this.deps.delay(at - elapsed)
       elapsed = at
       if (await this.findCreated(provider, operationId).catch(() => null)) {
         return

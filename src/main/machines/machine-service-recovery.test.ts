@@ -1,7 +1,10 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { encodePairingOffer } from '../../shared/pairing'
-import { MACHINE_CREATE_RECONCILE_WINDOW_MS } from '../../shared/machine-inventory'
+import {
+  MACHINE_CREATE_RECONCILE_WINDOW_MS,
+  type MachineProgressEvent
+} from '../../shared/machine-inventory'
 import { getMachineInventoryStorePath } from './machine-inventory-store'
 import { MachineService } from './machine-service'
 import {
@@ -136,6 +139,43 @@ describe('MachineService recovery', () => {
     clock.now += MACHINE_CREATE_RECONCILE_WINDOW_MS + 1
     await service.list(KEY, { force: true })
     expect(service.snapshots()[0]?.pendingCreates).toEqual([])
+  })
+
+  it('resolves a create only once the machine runs', async () => {
+    const { service, delay } = await setup({
+      create: (args) =>
+        reply(
+          machine({ state: 'creating', access: undefined, creatingOperationId: args.operationId })
+        )(args),
+      get: [reply(machine({ state: 'creating', access: undefined })), reply(machine())]
+    })
+    const record = await service.create(KEY, { name: 'dev', lifetime: 'persistent' })
+    expect(record).toMatchObject({ state: 'running', access: { kind: 'ssh' } })
+    expect(delay).toHaveBeenCalledWith(3_000)
+  })
+
+  it('tags wake progress with the caller operationId and machine', async () => {
+    const events: MachineProgressEvent[] = []
+    const { deps } = await setup({
+      list: inventory([machine({ state: 'sleeping', access: undefined })]),
+      wake: (args) => {
+        args.onStderr?.('starting container\n')
+        return reply(machine())(args)
+      }
+    })
+    const tagged = new MachineService({ ...deps, onProgress: (event) => events.push(event) })
+    await tagged.list(KEY)
+    await tagged.wake(KEY, 'sbx-1', { operationId: 'op-wake' })
+    expect(events).toEqual([
+      {
+        operationId: 'op-wake',
+        providerKey: KEY,
+        machineId: 'sbx-1',
+        verb: 'wake',
+        stream: 'stderr',
+        chunk: 'starting container\n'
+      }
+    ])
   })
 
   it('never overwrites an inventory written by a newer build', async () => {

@@ -21,7 +21,8 @@ import type { MachineProviderClient, MachineProviderEntry } from './machine-prov
 
 type MachineFetch = (
   providerKey: MachineProviderKey,
-  machineId: string
+  machineId: string,
+  onStderr?: (chunk: string) => void
 ) => Promise<{ record: MachineRecord; machine?: ProviderMachine }>
 
 /**
@@ -35,18 +36,23 @@ export class MachineConnectFlow {
     private readonly fetch: MachineFetch
   ) {}
 
-  async connect(providerKey: MachineProviderKey, machineId: string): Promise<MachineConnection> {
+  async connect(
+    providerKey: MachineProviderKey,
+    machineId: string,
+    operationId?: string
+  ): Promise<MachineConnection> {
     const provider = this.client.provider(providerKey)
+    const onStderr = this.client.progress(provider, 'connect', operationId, machineId)
     const cached = findRecord(this.client.inventory(providerKey), machineId)
     // Cached ssh access is reused; pairing codes are never stored, so orca-server always asks.
     const reusable = cached?.state === 'running' && cached.access?.kind === 'ssh' ? cached : null
-    const live = reusable ? null : await this.fetch(providerKey, machineId)
+    const live = reusable ? null : await this.fetch(providerKey, machineId, onStderr)
     try {
       return await this.connectTo(provider, live?.record ?? reusable, live?.machine?.access, cached)
     } catch (error) {
       if (reusable) {
         // The machine may have come back on a new endpoint; ask once, retry only if it moved.
-        const fresh = await this.fetch(providerKey, machineId).catch(() => null)
+        const fresh = await this.fetch(providerKey, machineId, onStderr).catch(() => null)
         if (fresh?.machine && machineEndpointChanged(reusable.access, fresh.machine.access)) {
           return this.connectOrMark(provider, fresh.record, fresh.machine.access, cached)
         }

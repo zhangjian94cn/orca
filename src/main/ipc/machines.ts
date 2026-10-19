@@ -89,9 +89,8 @@ export function registerMachineHandlers(store: Store, pluginService?: PluginServ
     'machines:sleep',
     onTarget((key, id) => service.sleep(key, id))
   )
-  ipcMain.handle(
-    'machines:wake',
-    onTarget((key, id) => service.wake(key, id))
+  ipcMain.handle('machines:wake', (_event, args: MachineTarget & { operationId?: string }) =>
+    act(store, () => service.wake(args.providerKey, args.machineId, args))
   )
   ipcMain.handle(
     'machines:archive',
@@ -101,8 +100,7 @@ export function registerMachineHandlers(store: Store, pluginService?: PluginServ
     'machines:delete',
     onTarget((key, id) => service.delete(key, id))
   )
-  ipcMain.handle(
-    'machines:connect',
-    onTarget((key, id) => service.connect(key, id))
+  ipcMain.handle('machines:connect', (_event, args: MachineTarget & { operationId?: string }) =>
+    act(store, () => service.connect(args.providerKey, args.machineId, args))
   )
 }

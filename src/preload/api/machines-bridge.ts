@@ -1,5 +1,5 @@
 import { ipcRenderer } from 'electron'
-import type { MachineProviderSnapshot } from '../../shared/machine-inventory'
+import type { MachineProgressEvent, MachineProviderSnapshot } from '../../shared/machine-inventory'
 import type { PreloadApi } from '../api-types'
 
 export const machinesApi = {
@@ -18,5 +18,11 @@ export const machinesApi = {
       callback(snapshot)
     ipcRenderer.on('machines:changed', listener)
     return () => ipcRenderer.removeListener('machines:changed', listener)
+  },
+  onProgress: (callback) => {
+    const listener = (_event: Electron.IpcRendererEvent, event: MachineProgressEvent): void =>
+      callback(event)
+    ipcRenderer.on('machines:progress', listener)
+    return () => ipcRenderer.removeListener('machines:progress', listener)
   }
 } satisfies PreloadApi['machines']
