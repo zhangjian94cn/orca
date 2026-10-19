@@ -85,6 +85,28 @@ export class SshConnectionStore {
     return next
   }
 
+  /** Creates a machine-owned target once; later endpoint changes go through updateTarget. */
+  ensureMachineOwnedTarget(
+    id: string,
+    target: Omit<SshTarget, 'id' | 'source' | 'lastRequiredPassphrase' | 'generation'> & {
+      owner: Extract<SshTarget['owner'], { type: 'machine' }>
+    }
+  ): SshTarget {
+    const existing = this.store.getSshTarget(id)
+    if (existing) {
+      return existing
+    }
+    const next: SshTarget = {
+      ...target,
+      id,
+      configHost: target.configHost ?? target.host,
+      source: 'manual',
+      generation: this.store.allocateSshTargetGeneration()
+    }
+    this.store.addSshTarget(next)
+    return next
+  }
+
   /** Exclusive managed-orcad ownership of a target; see ssh-target-orcad-claims. */
   getOrcadRuntimeClaims(): SshTargetOrcadClaims {
     return new SshTargetOrcadClaims(this.store)

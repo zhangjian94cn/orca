@@ -28,12 +28,22 @@ export type HostKeyPolicy =
    * than suspicious — and persisting would accumulate a record per launch.
    */
   | { kind: 'ephemeral' }
+  /**
+   * A machine provider read these fingerprints from the machine over an already-authenticated
+   * channel, so they outrank first contact and known_hosts. Nothing else is accepted.
+   */
+  | { kind: 'provider-pinned'; fingerprints: readonly string[] }
 
 export function hostKeyPolicyForOwner(owner: SshTargetOwner | undefined): HostKeyPolicy {
+  if (owner?.type === 'machine' && owner.hostKeyFingerprints?.length) {
+    return { kind: 'provider-pinned', fingerprints: owner.hostKeyFingerprints }
+  }
   return isEphemeralRuntimeSshOwner(owner) ? { kind: 'ephemeral' } : { kind: 'standard' }
 }
 
 export type HostKeyDecisionInput = {
+  /** "SHA256:…" of the presented key. */
+  fingerprint: string
   /** From the user's known_hosts files, unioned. */
   knownHostsOutcome: KnownHostsOutcome
   /** From our own store: does it already hold this exact key for host+port+type? */
@@ -167,6 +177,9 @@ export function decideHostKey(input: HostKeyDecisionInput): HostKeyDecision {
       reason: rejection(displayHost, 'This host key has been revoked.')
     }
   }
+  if (policy.kind === 'provider-pinned') {
+    return decidePinnedHostKey(input.fingerprint, policy.fingerprints, displayHost)
+  }
 
   // Either source holding a different key for this host and type is a change. known_hosts is named
   // first because its remedy (ssh-keygen -R) is the one that also unblocks ssh and git.
@@ -291,4 +304,28 @@ export function decideHostKey(input: HostKeyDecisionInput): HostKeyDecision {
     return { action: 'accept', outcome: unknownOutcome }
   }
   return { action: 'accept-and-remember', outcome: unknownOutcome }
+}
+
+function decidePinnedHostKey(
+  fingerprint: string,
+  expected: readonly string[],
+  displayHost: string
+): HostKeyDecision {
+  const presented = stripFingerprintPadding(fingerprint)
+  if (expected.some((candidate) => stripFingerprintPadding(candidate) === presented)) {
+    // Remembered so a later connect without provider fingerprints still pins this key.
+    return { action: 'accept-and-remember', outcome: 'match' }
+  }
+  return {
+    action: 'reject',
+    outcome: 'mismatch',
+    reason: rejection(
+      displayHost,
+      'The key does not match the fingerprints its machine provider reported. Refresh the machine and try again.'
+    )
+  }
+}
+
+function stripFingerprintPadding(fingerprint: string): string {
+  return fingerprint.replace(/=+$/, '')
 }

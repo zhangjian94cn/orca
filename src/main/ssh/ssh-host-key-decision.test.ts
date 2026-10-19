@@ -7,6 +7,7 @@ import {
 
 function input(overrides: Partial<HostKeyDecisionInput> = {}): HostKeyDecisionInput {
   return {
+    fingerprint: 'SHA256:presented',
     knownHostsOutcome: 'unknown',
     storeOutcome: 'unknown',
     strictHostKeyChecking: 'ask',
@@ -397,6 +398,20 @@ describe('deciding what to do with a presented host key', () => {
 })
 
 describe('hostKeyPolicyForOwner', () => {
+  it('pins a machine to its provider fingerprints, and treats one without any as standard', () => {
+    const owner = {
+      type: 'machine' as const,
+      runtimeId: 'machine-1',
+      providerKey: 'plugin:acme.omarchy/omarchy',
+      machineId: 'sbx-1'
+    }
+    expect(hostKeyPolicyForOwner({ ...owner, hostKeyFingerprints: ['SHA256:a'] })).toEqual({
+      kind: 'provider-pinned',
+      fingerprints: ['SHA256:a']
+    })
+    expect(hostKeyPolicyForOwner(owner)).toEqual({ kind: 'standard' })
+  })
+
   it('trusts first contact only for ephemeral runtime VMs', () => {
     expect(hostKeyPolicyForOwner({ type: 'on-demand-runtime', runtimeId: 'vm-1' })).toEqual({
       kind: 'ephemeral'
