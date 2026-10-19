@@ -45,6 +45,8 @@ export type SshTargetOwner =
       machineId: string
       /** "SHA256:…" keys the provider read from the machine; a connect must present one of them. */
       hostKeyFingerprints?: string[]
+      /** The same keys as "<type> <base64>", which system OpenSSH needs to pin them. */
+      hostKeys?: string[]
     }
 
 export type SshTarget = {

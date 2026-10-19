@@ -7,7 +7,8 @@
  */
 import { isEphemeralRuntimeSshOwner } from '../../shared/managed-orcad-ssh-owner'
 import type { SshTargetOwner } from '../../shared/ssh-types'
-import type { KnownHostsOutcome } from './config/ssh-known-hosts'
+import { createHash } from 'node:crypto'
+import { formatHostKeyFingerprint, type KnownHostsOutcome } from './config/ssh-known-hosts'
 
 /** Phase 1 ships no dialog; `prompt` is reserved for Phase 2 and never produced today. */
 export type HostKeyAction = 'accept' | 'accept-and-remember' | 'reject' | 'prompt'
@@ -32,11 +33,18 @@ export type HostKeyPolicy =
    * A machine provider read these fingerprints from the machine over an already-authenticated
    * channel, so they outrank first contact and known_hosts. Nothing else is accepted.
    */
-  | { kind: 'provider-pinned'; fingerprints: readonly string[] }
+  | { kind: 'provider-pinned'; fingerprints: readonly string[]; hostKeys: readonly string[] }
 
 export function hostKeyPolicyForOwner(owner: SshTargetOwner | undefined): HostKeyPolicy {
-  if (owner?.type === 'machine' && owner.hostKeyFingerprints?.length) {
-    return { kind: 'provider-pinned', fingerprints: owner.hostKeyFingerprints }
+  if (owner?.type === 'machine') {
+    const hostKeys = owner.hostKeys ?? []
+    const fingerprints = [
+      ...(owner.hostKeyFingerprints ?? []),
+      ...hostKeys.map(publicKeyFingerprint)
+    ]
+    if (fingerprints.length > 0) {
+      return { kind: 'provider-pinned', fingerprints, hostKeys }
+    }
   }
   return isEphemeralRuntimeSshOwner(owner) ? { kind: 'ephemeral' } : { kind: 'standard' }
 }
@@ -324,6 +332,12 @@ function decidePinnedHostKey(
       'The key does not match the fingerprints its machine provider reported. Refresh the machine and try again.'
     )
   }
+}
+
+/** "<type> <base64>" → "SHA256:…", the form ssh-keygen -l prints. */
+function publicKeyFingerprint(publicKey: string): string {
+  const blob = Buffer.from(publicKey.split(' ')[1] ?? '', 'base64')
+  return formatHostKeyFingerprint(createHash('sha256').update(blob).digest('base64'))
 }
 
 function stripFingerprintPadding(fingerprint: string): string {

@@ -47,7 +47,8 @@ function run(
 
 const pinnedPolicy = (fingerprints: string[]): HostKeyPolicy => ({
   kind: 'provider-pinned',
-  fingerprints
+  fingerprints,
+  hostKeys: []
 })
 
 describe('provider-pinned host keys', () => {

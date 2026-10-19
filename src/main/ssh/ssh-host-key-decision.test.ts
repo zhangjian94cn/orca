@@ -407,7 +407,14 @@ describe('hostKeyPolicyForOwner', () => {
     }
     expect(hostKeyPolicyForOwner({ ...owner, hostKeyFingerprints: ['SHA256:a'] })).toEqual({
       kind: 'provider-pinned',
-      fingerprints: ['SHA256:a']
+      fingerprints: ['SHA256:a'],
+      hostKeys: []
+    })
+    // Fingerprints are also derived from full keys, matching `ssh-keygen -lf`.
+    const key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq'
+    expect(hostKeyPolicyForOwner({ ...owner, hostKeys: [key] })).toMatchObject({
+      fingerprints: [expect.stringMatching(/^SHA256:[A-Za-z0-9+/]{43}$/)],
+      hostKeys: [key]
     })
     expect(hostKeyPolicyForOwner(owner)).toEqual({ kind: 'standard' })
   })

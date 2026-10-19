@@ -41,7 +41,8 @@ function targetFields(record: MachineRecord, access: SshAccess, id: string): Mac
       runtimeId: id,
       providerKey: record.providerKey,
       machineId: record.id,
-      ...(access.hostKeyFingerprints ? { hostKeyFingerprints: access.hostKeyFingerprints } : {})
+      ...(access.hostKeyFingerprints ? { hostKeyFingerprints: access.hostKeyFingerprints } : {}),
+      ...(access.hostKeys ? { hostKeys: access.hostKeys } : {})
     }
   }
 }
@@ -56,9 +57,12 @@ function endpointChanged(target: SshTarget, fields: MachineTargetFields): boolea
   )
 }
 
-function fingerprintsChanged(target: SshTarget, owner: MachineOwner): boolean {
-  const current = target.owner?.type === 'machine' ? target.owner.hostKeyFingerprints : undefined
-  return JSON.stringify(current ?? []) !== JSON.stringify(owner.hostKeyFingerprints ?? [])
+function pinnedKeysChanged(target: SshTarget, owner: MachineOwner): boolean {
+  const current = target.owner?.type === 'machine' ? target.owner : undefined
+  return (
+    JSON.stringify([current?.hostKeyFingerprints ?? [], current?.hostKeys ?? []]) !==
+    JSON.stringify([owner.hostKeyFingerprints ?? [], owner.hostKeys ?? []])
+  )
 }
 
 /**
@@ -80,7 +84,7 @@ export async function connectMachineSsh(
     // drops the stale runtime resolution for the new host.
     await targets.disconnect(id)
     targets.updateTarget(id, fields)
-  } else if (fingerprintsChanged(existing, fields.owner) || existing.label !== fields.label) {
+  } else if (pinnedKeysChanged(existing, fields.owner) || existing.label !== fields.label) {
     targets.updateTarget(id, { label: fields.label, owner: fields.owner })
   }
   const state = await targets.connect(id)
