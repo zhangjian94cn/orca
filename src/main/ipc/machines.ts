@@ -22,9 +22,13 @@ const CHANNELS = [
   'machines:connect'
 ] as const
 
+function isEnabled(store: Store): boolean {
+  return store.getSettings().experimentalEphemeralVms === true
+}
+
 /** Every action is refused while the experimental flag is off, so nothing runs a provider. */
 async function act<T>(store: Store, action: () => Promise<T> | T): Promise<MachineActionResult<T>> {
-  if (store.getSettings().experimentalEphemeralVms !== true) {
+  if (!isEnabled(store)) {
     return { ok: false, code: 'unsupported', message: 'Machines are not enabled.' }
   }
   try {
@@ -42,7 +46,9 @@ export function registerMachineHandlers(store: Store, pluginService?: PluginServ
   for (const channel of CHANNELS) {
     ipcMain.removeHandler(channel)
   }
-  const service = createDesktopMachineService(app.getPath('userData'), pluginService)
+  const service = createDesktopMachineService(app.getPath('userData'), pluginService, () =>
+    isEnabled(store)
+  )
   const onTarget =
     (run: (key: MachineProviderKey, machineId: string) => Promise<unknown>) =>
     (_event: unknown, args: MachineTarget) =>

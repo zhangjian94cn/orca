@@ -14,11 +14,11 @@ import { connectRegisteredSshTarget } from '../ssh/targets/ssh-target-registry'
 import type { MachineSshTargets } from './machine-connect'
 import { MachineService, type MachineProviderEntry } from './machine-service'
 
-let registered: MachineService | null = null
+let registered: { service: MachineService; isEnabled: () => boolean } | null = null
 
-/** The host's MachineService for runtime RPC; null where no desktop registered one. */
+/** The host's MachineService for runtime RPC; null where none is registered or the flag is off. */
 export function getMachineService(): MachineService | null {
-  return registered
+  return registered?.isEnabled() ? registered.service : null
 }
 
 function requireSshStore(): NonNullable<ReturnType<typeof getSshConnectionStore>> {
@@ -63,9 +63,10 @@ function broadcastMachinesChanged(snapshot: MachineProviderSnapshot): void {
 /** Providers run in this process, with this desktop's ssh config and credentials. */
 export function createDesktopMachineService(
   userDataPath: string,
-  pluginService?: PluginService
+  pluginService: PluginService | undefined,
+  isEnabled: () => boolean
 ): MachineService {
-  registered = new MachineService({
+  const service = new MachineService({
     userDataPath,
     listProviders: () => listPluginMachineProviders(pluginService),
     onChanged: broadcastMachinesChanged,
@@ -81,5 +82,6 @@ export function createDesktopMachineService(
       repair: (args) => verifyAndRepairRuntimeEnvironmentFromPairingCode(userDataPath, args)
     }
   })
-  return registered
+  registered = { service, isEnabled }
+  return service
 }

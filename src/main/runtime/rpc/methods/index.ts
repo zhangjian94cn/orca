@@ -38,6 +38,7 @@ import { LINEAR_AGENT_ACCESS_METHODS } from './linear-agent-access'
 import { JIRA_METHODS } from './jira'
 import { SSH_METHODS } from './ssh'
 import { MANAGED_SERVER_METHODS } from './managed-server'
+import { MACHINE_METHODS } from './machines'
 import { SPEECH_METHODS } from './speech'
 import { CLIENT_UI_METHODS } from './client-ui'
 import { CLIENT_EVENT_METHODS } from './client-events'
@@ -122,6 +123,7 @@ export const ALL_RPC_METHODS = [
   ...JIRA_METHODS,
   ...SSH_METHODS,
   ...MANAGED_SERVER_METHODS,
+  ...MACHINE_METHODS,
   ...SPEECH_METHODS,
   ...WORKSPACE_PORT_METHODS,
   ...PLUGIN_METHODS,
