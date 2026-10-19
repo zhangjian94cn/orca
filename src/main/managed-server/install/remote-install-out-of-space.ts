@@ -11,6 +11,10 @@ import { isWindowsRemoteHost, type RemoteHostPlatform } from '../../ssh/ssh-remo
 import { quotePosixShell } from '../../../shared/shell-argument-quoting'
 
 const DIAGNOSIS_TIMEOUT_MS = 15_000
+const SSH_FX_FAILURE = 4
+// Why a floor and not the write's size: a partial upload already spent some room, so only a
+// filesystem that is effectively empty proves the write ran out of it.
+const EXHAUSTED_KB = 1024
 
 export class RemoteInstallOutOfSpaceError extends Error {
   constructor(
@@ -55,8 +59,8 @@ export async function localTreeBytes(path: string): Promise<number> {
 }
 
 /**
- * The out-of-space error when the host can't hold the write that just failed, else `error` itself.
- * A lost or aborted transfer stays as it was: loss of contact says nothing about the disk.
+ * The out-of-space error when SFTP's generic failure met an exhausted filesystem, else `error`
+ * itself. A lost or aborted transfer stays as it was: loss of contact says nothing about the disk.
  */
 export async function explainRemoteInstallWriteFailure(
   conn: RemoteInstallTransport,
@@ -70,6 +74,8 @@ export async function explainRemoteInstallWriteFailure(
     isWindowsRemoteHost(host) ||
     signal?.aborted ||
     !(error instanceof Error) ||
+    !('code' in error) ||
+    error.code !== SSH_FX_FAILURE ||
     isUnconfirmedSshCommandTermination(error)
   ) {
     return error
@@ -84,7 +90,7 @@ export async function explainRemoteInstallWriteFailure(
     ])
     const availableKb = dfAvailableKb(line.trim().split(/\r?\n/u).at(-1))
     const neededKb = Math.ceil(needed / 1024)
-    return availableKb !== null && availableKb < neededKb
+    return availableKb !== null && availableKb < Math.min(neededKb, EXHAUSTED_KB)
       ? new RemoteInstallOutOfSpaceError(remotePath, availableKb, neededKb, error)
       : error
   } catch {

@@ -71,8 +71,9 @@ describe('a failed install write on a full host', () => {
     ).rejects.toThrow(/has 0 KB free, and Orca needs about 1 KB/)
   })
 
-  it('keeps the original error when the host has room for the write', async () => {
-    vi.mocked(execHostCommand).mockResolvedValue(dfLine(500_000))
+  it('keeps the original error when the filesystem still has room', async () => {
+    // Less than the whole bundle, but a partial upload may have spent the rest: not proof.
+    vi.mocked(execHostCommand).mockResolvedValue(dfLine(1_500))
     const failure = sftpFailure()
     await expect(
       uploadRelayDirectory(
@@ -97,8 +98,22 @@ describe('a failed install write on a full host', () => {
     ).rejects.toBe(failure)
   })
 
+  it('keeps explicit refusals such as permission denied without probing', async () => {
+    const denied = Object.assign(new Error('Permission denied'), { code: 3 })
+    await expect(
+      uploadRelayDirectory(
+        connection(() => denied),
+        localDir,
+        '/root/r',
+        posix
+      )
+    ).rejects.toBe(denied)
+    expect(execHostCommand).not.toHaveBeenCalled()
+  })
+
   it('never probes after unverifiable transport loss, an abort, or on Windows', async () => {
     const lost = Object.assign(new Error('SSH command timed out'), {
+      code: 4,
       sshChannelCloseConfirmed: false
     })
     await expect(
@@ -130,11 +145,14 @@ describe('a failed install write on a full host', () => {
 })
 
 describe('remoteFreeSpaceProbeCommand', () => {
-  it('reads free space from the nearest existing directory through a real /bin/sh', () => {
-    const missing = join(localDir, "not yet's made", 'stage dir')
-    const out = execFileSync('/bin/sh', ['-c', remoteFreeSpaceProbeCommand(missing)], {
-      encoding: 'utf8'
-    })
-    expect(dfAvailableKb(out.trim())).toEqual(expect.any(Number))
-  })
+  it.skipIf(process.platform === 'win32')(
+    'reads free space from the nearest existing directory through a real /bin/sh',
+    () => {
+      const missing = join(localDir, "not yet's made", 'stage dir')
+      const out = execFileSync('/bin/sh', ['-c', remoteFreeSpaceProbeCommand(missing)], {
+        encoding: 'utf8'
+      })
+      expect(dfAvailableKb(out.trim())).toEqual(expect.any(Number))
+    }
+  )
 })
