@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { MACHINE_SSH_TARGET_ID_PREFIX } from '../../shared/execution-host'
 import type { MachineAccess } from '../../shared/machine-provider-protocol'
 import type { MachineRecord } from '../../shared/machine-inventory'
 import { parseHostAccessLink } from '../../shared/remote-pairing-address'
@@ -26,7 +27,7 @@ export type MachineSshConnectResult = { sshTargetId: string; environmentId?: str
 /** Stable for the machine's life, so worktrees and tabs keyed to it survive endpoint changes. */
 export function machineSshTargetId(providerKey: string, machineId: string): string {
   const digest = createHash('sha256').update(`${providerKey}\0${machineId}`).digest('hex')
-  return `machine-${digest.slice(0, 20)}`
+  return `${MACHINE_SSH_TARGET_ID_PREFIX}${digest.slice(0, 20)}`
 }
 
 function targetFields(record: MachineRecord, access: SshAccess, id: string): MachineTargetFields {
