@@ -16135,8 +16135,6 @@
           "7c41e90d12": "Ce fichier a été modifié sur le disque alors que vous avez des modifications non enregistrées. L'enregistrement écrasera le contenu plus récent présent sur le disque.",
           "3fa2b8d417": "Recharger depuis le disque",
           "a95d02c644": "Garder mes modifications",
-          "5c02de9b31": "Rechargé depuis le disque",
-          "d1e830fa22": "Annuler",
           "90b2ce7d43": "Comparer"
         },
         "ExternalFileChangeCompareDialog": {

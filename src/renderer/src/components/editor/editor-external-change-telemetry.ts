@@ -9,12 +9,7 @@ import type { OpenFile } from '@/store/slices/editor'
 type ConflictSurface = 'edit' | 'unstaged-diff'
 type ConflictTransport = 'local' | 'ssh' | 'runtime'
 
-export type ExternalChangeConflictAction =
-  | 'reload'
-  | 'keep'
-  | 'compare'
-  | 'undo_reload'
-  | 'save_overwrite'
+export type ExternalChangeConflictAction = 'reload' | 'keep' | 'compare' | 'save_overwrite'
 
 function conflictSurface(file: Pick<OpenFile, 'mode'>): ConflictSurface {
   return file.mode === 'edit' ? 'edit' : 'unstaged-diff'

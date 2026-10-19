@@ -16305,8 +16305,9 @@
           "7c41e90d12": "This file changed on disk while you have unsaved edits. Saving will overwrite the newer disk content.",
           "3fa2b8d417": "Reload from Disk",
           "a95d02c644": "Keep My Edits",
-          "5c02de9b31": "Reloaded from disk",
-          "d1e830fa22": "Undo",
+          "reloadFailed": "Could not reload from disk",
+          "discardTitle": "Discard your unsaved edits?",
+          "discardDescription": "{{value0}} will be replaced with the version on disk. This view can't undo it.",
           "90b2ce7d43": "Compare"
         },
         "ExternalFileChangeCompareDialog": {

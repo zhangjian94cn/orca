@@ -4,7 +4,10 @@ import { act, useLayoutEffect, useRef, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { OpenFile } from '@/store/slices/editor'
-import { ORCA_EDITOR_EXTERNAL_FILE_CHANGE_EVENT } from './editor-autosave'
+import {
+  ORCA_EDITOR_EXTERNAL_FILE_CHANGE_EVENT,
+  ORCA_EDITOR_FILE_RELOADED_EVENT
+} from './editor-autosave'
 import type { DiffContent, FileContent } from './editor-panel-content-types'
 import { useEditorPanelExternalContentEvents } from './useEditorPanelExternalContentEvents'
 
@@ -23,14 +26,22 @@ type ProbeProps = {
   calls: ProbeCalls
   isVisible: boolean
   openFiles: OpenFile[]
+  onFileContents?: (fileContents: Record<string, FileContent>) => void
 }
 
-function ExternalContentProbe({ activeFileId, calls, isVisible, openFiles }: ProbeProps): null {
+function ExternalContentProbe({
+  activeFileId,
+  calls,
+  isVisible,
+  openFiles,
+  onFileContents
+}: ProbeProps): null {
   const activeContentFileIdRef = useRef(activeFileId)
   const isVisibleRef = useRef(isVisible)
   const openFilesRef = useRef(openFiles)
   const editorViewModeRef = useRef({})
-  const [, setFileContents] = useState<Record<string, FileContent>>({})
+  const [fileContents, setFileContents] = useState<Record<string, FileContent>>({})
+  onFileContents?.(fileContents)
   const [, setDiffContents] = useState<Record<string, DiffContent>>({})
 
   useLayoutEffect(() => {
@@ -140,6 +151,44 @@ describe('useEditorPanelExternalContentEvents', () => {
     for (const calls of retainedCalls) {
       expect(calls.invalidate).toHaveBeenCalledExactlyOnceWith([changedFile.id])
     }
+  })
+
+  it('has every panel adopt a banner reload from one event, without rereading', () => {
+    const file = makeFile('reloaded', { isDirty: true, externalMutation: 'changed' })
+    const calls = makeCalls()
+    const seen: Record<string, FileContent>[] = [{}, {}]
+
+    const renderPane = (index: number): React.JSX.Element => (
+      <ExternalContentProbe
+        activeFileId={file.id}
+        calls={calls}
+        isVisible
+        openFiles={[file]}
+        onFileContents={(contents) => {
+          seen[index] = contents
+        }}
+      />
+    )
+    act(() => {
+      root.render(
+        <>
+          <div key="left">{renderPane(0)}</div>
+          <div key="right">{renderPane(1)}</div>
+        </>
+      )
+    })
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(ORCA_EDITOR_FILE_RELOADED_EVENT, {
+          detail: { fileId: file.id, content: 'disk text' }
+        })
+      )
+    })
+
+    for (const contents of seen) {
+      expect(contents[file.id]).toEqual({ content: 'disk text', isBinary: false })
+    }
+    expect(calls.loadFile).not.toHaveBeenCalled()
   })
 
   it('invalidates a hidden owner without reloading until reveal', () => {

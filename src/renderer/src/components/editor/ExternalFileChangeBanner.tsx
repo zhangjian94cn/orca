@@ -2,119 +2,24 @@ import React, { useState } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { getConnectionIdForFile } from '@/lib/connection-context'
-import { editorTabFileAccess } from '@/lib/local-file-access'
-import { readRuntimeFileContent } from '@/runtime/runtime-file-read-client'
-import { getRuntimeTargetForFileOwner } from '@/lib/file-owner-runtime-target'
+import { useConfirmationDialog } from '@/components/confirmation-dialog-context'
 import { useAppStore } from '@/store'
 import { translate } from '@/i18n/i18n'
 import type { OpenFile } from '@/store/slices/editor'
 import { ExternalFileChangeCompareDialog } from './ExternalFileChangeCompareDialog'
-import { getDiskBaselineSignature } from './diff-content-signature'
 import { trackExternalChangeConflictAction } from './editor-external-change-telemetry'
+import {
+  discardDraftAndReloadContent,
+  getMountedEditModel,
+  keepTabEditsOverExternalChange,
+  reloadMountedModelFromDisk
+} from './external-file-change-actions'
 
 // Why: when an external process (usually an agent) rewrites a file while the
 // tab holds unsaved edits, the reload pipeline preserves the buffer and marks
 // the tab externalMutation='changed' (issue #7265). This banner is the
 // recovery path — without it the tab is silently stale until close/reopen and
 // the next save clobbers the newer disk content unannounced.
-
-const RELOAD_UNDO_TOAST_DURATION_MS = 8_000
-
-export function reloadTabContentFromDisk(
-  file: OpenFile,
-  reloadContent: (file: OpenFile) => void
-): void {
-  const state = useAppStore.getState()
-  const discardedDraft = state.editorDrafts[file.id]
-  const discardedDiskSignature = state.openFiles.find(
-    (openFile) => openFile.id === file.id
-  )?.lastKnownDiskSignature
-  // Why: drop the draft before reloading — the buffer shadows loaded content
-  // (editBuffers ?? fileContents), so a reload alone would keep showing the
-  // stale unsaved text.
-  state.clearEditorDraft(file.id)
-  state.markFileDirty(file.id, false)
-  state.setExternalMutation(file.id, null)
-  reloadContent(file)
-  if (discardedDraft === undefined) {
-    return
-  }
-  // Why: on diff tabs the reload rotates the Monaco model, destroying the undo
-  // stack — without this toast a mistaken click is an unrecoverable discard.
-  toast(
-    translate('auto.components.editor.ExternalFileChangeBanner.5c02de9b31', 'Reloaded from disk'),
-    {
-      description: file.relativePath,
-      duration: RELOAD_UNDO_TOAST_DURATION_MS,
-      action: {
-        label: translate('auto.components.editor.ExternalFileChangeBanner.d1e830fa22', 'Undo'),
-        onClick: () => {
-          const current = useAppStore.getState()
-          const liveFile = current.openFiles.find((openFile) => openFile.id === file.id)
-          // Why: the tab may have closed while the toast was up; restoring a
-          // draft for a dead fileId would strand an orphan buffer. And if the
-          // user already typed after the reload (dirty), that newer work wins
-          // — undoing over it would be a second silent discard. isDirty is the
-          // signal: the editor content-sync repopulates editorDrafts with the
-          // reloaded content itself, so draft existence proves nothing.
-          if (!liveFile || liveFile.isDirty) {
-            return
-          }
-          current.setEditorDraft(file.id, discardedDraft)
-          current.markFileDirty(file.id, true)
-          // Why: the disk still differs from the restored draft, so the
-          // conflict (and its autosave suspension) must come back with it.
-          current.setExternalMutation(file.id, 'changed')
-          if (discardedDiskSignature !== undefined) {
-            // Why: the reload re-stamped the baseline to the new disk content;
-            // restoring the pre-reload signature with the draft keeps the
-            // restart scan re-deriving the conflict the undo just brought back.
-            current.setLastKnownDiskSignature(file.id, discardedDiskSignature)
-          }
-          trackExternalChangeConflictAction(file, 'undo_reload')
-        }
-      }
-    }
-  )
-}
-
-export function keepTabEditsOverExternalChange(file: OpenFile): void {
-  const state = useAppStore.getState()
-  state.setExternalMutation(file.id, null)
-  // Why: the dismissal must survive restart — without advancing the baseline
-  // to the current disk content, the restored-tab conflict scan re-derives
-  // the dismissed conflict from the stale signature on every launch.
-  // Best-effort: a failed read leaves the old signature, which can only
-  // re-surface the banner — never lose data.
-  const target = getRuntimeTargetForFileOwner(state, file.worktreeId, file.runtimeEnvironmentId)
-  if (!target) {
-    return
-  }
-  void readRuntimeFileContent({
-    target,
-    filePath: file.filePath,
-    relativePath: file.relativePath,
-    worktreeId: file.worktreeId,
-    connectionId: getConnectionIdForFile(file.worktreeId, file.filePath) ?? undefined,
-    expectedExternalSshTargetId: file.externalSshTargetId,
-    access: editorTabFileAccess(state, file)
-  })
-    .then((result) => {
-      if (result.isBinary) {
-        return
-      }
-      const current = useAppStore.getState()
-      const liveFile = current.openFiles.find((openFile) => openFile.id === file.id)
-      // Why: only stamp while the dismissal still stands — a save or a newer
-      // conflict marked in the interim owns the baseline.
-      if (!liveFile || liveFile.externalMutation === 'changed') {
-        return
-      }
-      current.setLastKnownDiskSignature(file.id, getDiskBaselineSignature(result.content))
-    })
-    .catch(() => undefined)
-}
 
 export function ExternalFileChangeBanner({
   file,
@@ -129,10 +34,49 @@ export function ExternalFileChangeBanner({
   reloadContent: (file: OpenFile) => void
 }): React.JSX.Element {
   const [compareOpen, setCompareOpen] = useState(false)
+  const confirm = useConfirmationDialog()
 
-  const handleReload = (): void => {
+  const handleReload = async (): Promise<void> => {
     trackExternalChangeConflictAction(file, 'reload')
-    reloadTabContentFromDisk(file, reloadContent)
+    const mounted = getMountedEditModel(file, useAppStore.getState())
+    if (mounted) {
+      // Why: Cmd+Z in the editor brings the edits back, so no confirmation or undo toast.
+      await reloadMountedModelFromDisk(file, mounted).catch((err: unknown) => {
+        toast.error(
+          translate(
+            'auto.components.editor.ExternalFileChangeBanner.reloadFailed',
+            'Could not reload from disk'
+          ),
+          { description: err instanceof Error ? err.message : String(err) }
+        )
+      })
+      return
+    }
+    // Why: rich, preview, notebook, CSV and diff views have no undo across a reload — ask first.
+    const confirmed = await confirm({
+      title: translate(
+        'auto.components.editor.ExternalFileChangeBanner.discardTitle',
+        'Discard your unsaved edits?'
+      ),
+      description: translate(
+        'auto.components.editor.ExternalFileChangeBanner.discardDescription',
+        "{{value0}} will be replaced with the version on disk. This view can't undo it.",
+        { value0: file.relativePath }
+      ),
+      confirmLabel: translate(
+        'auto.components.editor.ExternalFileChangeBanner.3fa2b8d417',
+        'Reload from Disk'
+      ),
+      confirmVariant: 'destructive',
+      ignoresOpeningGesture: true
+    })
+    if (
+      confirmed &&
+      useAppStore.getState().openFiles.find((openFile) => openFile.id === file.id)
+        ?.externalMutation === 'changed'
+    ) {
+      discardDraftAndReloadContent(file, reloadContent)
+    }
   }
   const handleKeepEdits = (): void => {
     trackExternalChangeConflictAction(file, 'keep')
@@ -163,7 +107,7 @@ export function ExternalFileChangeBanner({
           <Button type="button" size="xs" variant="outline" onClick={handleCompare}>
             {translate('auto.components.editor.ExternalFileChangeBanner.90b2ce7d43', 'Compare')}
           </Button>
-          <Button type="button" size="xs" variant="outline" onClick={handleReload}>
+          <Button type="button" size="xs" variant="outline" onClick={() => void handleReload()}>
             {translate(
               'auto.components.editor.ExternalFileChangeBanner.3fa2b8d417',
               'Reload from Disk'
@@ -183,7 +127,7 @@ export function ExternalFileChangeBanner({
           currentContent={currentContent}
           open={compareOpen}
           onOpenChange={setCompareOpen}
-          onReload={handleReload}
+          onReload={() => void handleReload()}
           onKeepEdits={handleKeepEdits}
         />
       )}

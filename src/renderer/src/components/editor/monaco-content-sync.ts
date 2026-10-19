@@ -129,3 +129,18 @@ export function syncContentUpdate(
   }
   replaceModelContent(editorInstance, model, currentContent, normalizedContent, mode, true)
 }
+
+/** Replace a model's whole text as one undo step, independent of any mounted editor instance. */
+export function replaceModelContentAsUndoStep(model: editor.ITextModel, content: string): void {
+  const normalizedContent = normalizeToModelEol(content, model)
+  if (model.getValue() === normalizedContent) {
+    return
+  }
+  model.pushStackElement()
+  model.pushEditOperations(
+    [],
+    [{ range: model.getFullModelRange(), text: normalizedContent }],
+    () => null
+  )
+  model.pushStackElement()
+}

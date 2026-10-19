@@ -16036,8 +16036,6 @@
           "7c41e90d12": "Este archivo cambió en el disco mientras tenías ediciones sin guardar. Guardar sobrescribirá el contenido más reciente del disco.",
           "3fa2b8d417": "Recargar desde disco",
           "a95d02c644": "Mantener mis ediciones",
-          "5c02de9b31": "Recargado desde disco",
-          "d1e830fa22": "Deshacer",
           "90b2ce7d43": "Comparar"
         },
         "ExternalFileChangeCompareDialog": {

@@ -14,6 +14,8 @@ export const ORCA_EDITOR_EXTERNAL_FILE_CHANGE_EVENT = 'orca:editor-external-file
 export const ORCA_EDITOR_SAVE_FILE_EVENT = 'orca:editor-save-file'
 export const ORCA_EDITOR_SAVE_AND_CLOSE_EVENT = 'orca:save-and-close'
 export const ORCA_EDITOR_FILE_SAVED_EVENT = 'orca:editor-file-saved'
+// Why separate from saved: save listeners (mobile, chat, CSV) must not treat a disk reload as a save.
+export const ORCA_EDITOR_FILE_RELOADED_EVENT = 'orca:editor-file-reloaded'
 export const ORCA_EDITOR_REQUEST_CMD_SAVE_EVENT = 'orca:editor-request-cmd-save'
 export const ORCA_EDITOR_REQUEST_FILE_CLOSE_EVENT = 'orca:editor-request-file-close'
 

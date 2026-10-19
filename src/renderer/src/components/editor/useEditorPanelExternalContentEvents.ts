@@ -5,6 +5,7 @@ import type { OpenFile } from '@/store/slices/editor'
 import {
   getOpenFilesForExternalFileChange,
   ORCA_EDITOR_EXTERNAL_FILE_CHANGE_EVENT,
+  ORCA_EDITOR_FILE_RELOADED_EVENT,
   ORCA_EDITOR_FILE_SAVED_EVENT,
   type EditorFileSavedDetail,
   type EditorPathMutationTarget
@@ -189,8 +190,13 @@ export function useEditorPanelExternalContentEvents({
         return { ...prev, [file.id]: { ...existing, modifiedContent: detail.content } }
       })
     }
-    window.addEventListener(ORCA_EDITOR_FILE_SAVED_EVENT, handler as EventListener)
-    return () => window.removeEventListener(ORCA_EDITOR_FILE_SAVED_EVENT, handler as EventListener)
+    // Why: a banner reload knows the exact disk text, like a save — every panel adopts it as its baseline.
+    window.addEventListener(ORCA_EDITOR_FILE_SAVED_EVENT, handler)
+    window.addEventListener(ORCA_EDITOR_FILE_RELOADED_EVENT, handler)
+    return () => {
+      window.removeEventListener(ORCA_EDITOR_FILE_SAVED_EVENT, handler)
+      window.removeEventListener(ORCA_EDITOR_FILE_RELOADED_EVENT, handler)
+    }
   }, [openFilesRef, setDiffContents, setFileContents])
 }
 
