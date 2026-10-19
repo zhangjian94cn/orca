@@ -146,7 +146,16 @@ describe('parseMachineProviderResponse', () => {
         parseMachineProviderResponse(respond({ kind: 'machine', machine: machine() }), withContext)
       )
     ).toBe('context-mismatch')
-    // Signed-out providers may not know their context, so errors pass through.
+    // A not-found from another account would mark machines gone, so it fails closed too.
+    expect(
+      errorCode(() =>
+        parseMachineProviderResponse(
+          respond({ kind: 'error', code: 'not-found', message: 'gone' }),
+          withContext
+        )
+      )
+    ).toBe('context-mismatch')
+    // Signed-out providers may not know their context, so auth errors pass through.
     expect(
       parseMachineProviderResponse(
         respond({ kind: 'error', code: 'auth-required', message: 'sign in' }),

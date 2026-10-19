@@ -259,14 +259,23 @@ export function parseMachineProviderResponse(
   if (response.operationId !== request.operationId) {
     throw invalid('The provider response does not echo the request operationId.')
   }
-  if (response.kind === 'error') {
-    return response
-  }
-  if (request.contextId !== undefined && response.contextId !== request.contextId) {
+  // A signed-out or unreachable provider may not know its account. Any other answer, including
+  // not-found, would change Orca's state, so it must come from the account Orca asked.
+  const mayOmitContext =
+    response.kind === 'error' &&
+    (response.code === 'auth-required' || response.code === 'unavailable')
+  if (
+    !mayOmitContext &&
+    request.contextId !== undefined &&
+    response.contextId !== request.contextId
+  ) {
     throw new MachineProviderError(
       'context-mismatch',
       'The provider is signed in as a different account.'
     )
+  }
+  if (response.kind === 'error') {
+    return response
   }
   if (response.kind !== EXPECTED_KIND[request.verb]) {
     throw invalid(`The provider answered ${request.verb} with a ${response.kind} response.`)
