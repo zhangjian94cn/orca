@@ -14,6 +14,7 @@ import {
   machineEndpointChanged,
   machineSshTargetId,
   type MachinePairing,
+  type MachineSshConnectResult,
   type MachineSshTargets
 } from './machine-connect'
 import { findRecord, markUnreachable, patchRecord } from './machine-inventory-records'
@@ -29,12 +30,29 @@ type MachineFetch = (
  * Connects a machine's access. A failure never removes its SSH target; it marks the machine
  * unreachable, and a failure on cached access asks the provider once in case the machine moved.
  */
+// A provider reports running when its container starts, before sshd accepts; dial again briefly.
+const FRESH_START_WINDOW_MS = 60_000
+const FRESH_START_RETRY_DELAYS_MS = [2_000, 6_000, 12_000]
+
 export class MachineConnectFlow {
+  private readonly startedAt = new Map<string, number>()
+
   constructor(
     private readonly client: MachineProviderClient,
-    private readonly deps: { sshTargets: MachineSshTargets; pairing: MachinePairing },
+    private readonly deps: {
+      sshTargets: MachineSshTargets
+      pairing: MachinePairing
+      delay: (ms: number) => Promise<void>
+    },
     private readonly fetch: MachineFetch
   ) {}
+
+  /** A machine just created or woken; its first connects tolerate sshd still starting. */
+  noteStarted(record: MachineRecord): void {
+    if (record.state === 'running') {
+      this.startedAt.set(`${record.providerKey}\0${record.id}`, this.client.now())
+    }
+  }
 
   async connect(
     providerKey: MachineProviderKey,
@@ -96,7 +114,7 @@ export class MachineConnectFlow {
     if (access.kind === 'ssh') {
       // Recorded before connecting: the target exists from here on, even if this connect fails.
       patch({ sshTargetId: machineSshTargetId(provider.providerKey, record.id) })
-      const result = await connectMachineSsh(this.deps.sshTargets, record, access)
+      const result = await this.dialSsh(record, access)
       patch({ lastError: undefined })
       return { kind: 'ssh', ...result }
     }
@@ -108,5 +126,26 @@ export class MachineConnectFlow {
     )
     patch({ runtimeEnvironmentId: result.runtimeEnvironmentId, lastError: undefined })
     return { kind: 'orca-server', ...result }
+  }
+
+  private async dialSsh(
+    record: MachineRecord,
+    access: Extract<MachineAccess, { kind: 'ssh' }>
+  ): Promise<MachineSshConnectResult> {
+    const started = this.startedAt.get(`${record.providerKey}\0${record.id}`)
+    const fresh = started !== undefined && this.client.now() - started < FRESH_START_WINDOW_MS
+    const delays = fresh ? FRESH_START_RETRY_DELAYS_MS : []
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await connectMachineSsh(this.deps.sshTargets, record, access)
+      } catch (error) {
+        // A refused host key is a verdict, not a slow start.
+        const delay = delays[attempt]
+        if (delay === undefined || /Host key verification failed/.test(String(error))) {
+          throw error
+        }
+        await this.deps.delay(delay)
+      }
+    }
   }
 }

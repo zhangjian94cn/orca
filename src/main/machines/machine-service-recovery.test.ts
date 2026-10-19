@@ -67,6 +67,31 @@ describe('MachineService recovery', () => {
     expect(sshTargets.connect).toHaveBeenCalledTimes(2)
   })
 
+  it('redials a just-woken machine while its sshd starts, but never past a key refusal', async () => {
+    const { service, sshTargets, delay } = await setup({
+      list: inventory([machine({ state: 'sleeping', access: undefined })]),
+      wake: reply(machine())
+    })
+    const refused = { targetId: 't', status: 'error' as const, reconnectAttempt: 0 }
+    vi.mocked(sshTargets.connect)
+      .mockResolvedValueOnce({ ...refused, error: 'Connection closed by UNKNOWN port 65535' })
+      .mockResolvedValueOnce({
+        targetId: 't',
+        status: 'connected',
+        error: null,
+        reconnectAttempt: 0
+      })
+      .mockResolvedValueOnce({ ...refused, error: 'Host key verification failed for x.' })
+    await service.list(KEY)
+    await service.wake(KEY, 'sbx-1')
+    await expect(service.connect(KEY, 'sbx-1')).resolves.toMatchObject({ kind: 'ssh' })
+    expect(delay).toHaveBeenCalledWith(2_000)
+
+    delay.mockClear()
+    await expect(service.connect(KEY, 'sbx-1')).rejects.toThrow('Host key verification failed')
+    expect(delay).not.toHaveBeenCalled()
+  })
+
   it('does not retry when the endpoint is unchanged', async () => {
     const { service, sshTargets } = await setup({
       list: inventory([machine()]),

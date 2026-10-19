@@ -61,8 +61,10 @@ export class MachineService {
         (await this.fetch(providerKey, machineId, onStderr)).record,
       delay: (ms) => this.delay(ms)
     })
-    this.connections = new MachineConnectFlow(this.client, deps, (key, id, onStderr) =>
-      this.fetch(key, id, onStderr)
+    this.connections = new MachineConnectFlow(
+      this.client,
+      { ...deps, delay: (ms) => this.delay(ms) },
+      (key, id, onStderr) => this.fetch(key, id, onStderr)
     )
   }
 
@@ -109,7 +111,9 @@ export class MachineService {
     params: MachineCreateParams,
     options: { operationId?: string } = {}
   ): Promise<MachineRecord> {
-    return this.creates.create(providerKey, params, options.operationId)
+    return this.creates
+      .create(providerKey, params, options.operationId)
+      .then((record) => this.started(record))
   }
 
   cancelCreate(operationId: string): boolean {
@@ -126,7 +130,9 @@ export class MachineService {
     machineId: string,
     options: { operationId?: string } = {}
   ): Promise<MachineRecord> {
-    return this.mutate(providerKey, machineId, 'wake', options.operationId)
+    return this.mutate(providerKey, machineId, 'wake', options.operationId).then((record) =>
+      this.started(record)
+    )
   }
 
   archive(providerKey: MachineProviderKey, machineId: string): Promise<MachineRecord> {
@@ -303,6 +309,11 @@ export class MachineService {
       inventory.listedAt !== undefined &&
       now - inventory.listedAt < maxAgeMs
     )
+  }
+
+  private started(record: MachineRecord): MachineRecord {
+    this.connections.noteStarted(record)
+    return record
   }
 
   private delay(ms: number): Promise<void> {
