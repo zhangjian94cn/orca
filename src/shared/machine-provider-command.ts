@@ -82,6 +82,11 @@ export const machineProviderCommandSchema = z
     })
   })
 
+// Why quote every argument: argv runs without a shell, so word boundaries must be unambiguous.
+export function formatMachineProviderArgv(argv: readonly string[]): string {
+  return argv.map((value) => JSON.stringify(value)).join(' ')
+}
+
 /** Appends `<verb> --json [--id <machineId>]`; everything else travels on stdin. */
 export function buildMachineProviderArgv(
   command: readonly string[],

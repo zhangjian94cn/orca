@@ -1,5 +1,6 @@
 import type { PluginHostListEntry } from '../../../../preload/api-types'
 import { translate } from '@/i18n/i18n'
+import { formatMachineProviderArgv } from '../../../../shared/machine-provider-command'
 
 type VmRecipePreview = NonNullable<PluginHostListEntry['vmRecipes']>[number]
 
@@ -14,11 +15,6 @@ function lifecycleLabel(phase: VmRecipePreview['commands'][number]['phase']): st
     case 'destroy':
       return translate('auto.components.settings.PluginVmRecipeConsentPreview.destroy', 'Destroy')
   }
-}
-
-// Why quote every argument: argv runs without a shell, so word boundaries must be unambiguous.
-function formatArgv(argv: readonly string[]): string {
-  return argv.map((value) => JSON.stringify(value)).join(' ')
 }
 
 export function PluginVmRecipeConsentPreview({
@@ -67,12 +63,13 @@ export function PluginVmRecipeConsentPreview({
                     )}
                     className="max-h-40 overflow-auto scrollbar-sleek whitespace-pre-wrap break-all rounded-md bg-muted px-2.5 py-2 font-mono text-xs leading-5 text-foreground"
                   >
-                    {formatArgv(recipe.machineProviderCommand)}
+                    {formatMachineProviderArgv(recipe.machineProviderCommand)}
                   </pre>
                 </dd>
               </div>
             ) : null}
-            {recipe.commands.map(({ phase, command }) => {
+            {/* The `commands` entry is the older-client copy of the same argv. */}
+            {(recipe.machineProviderCommand ? [] : recipe.commands).map(({ phase, command }) => {
               const phaseLabel = lifecycleLabel(phase)
               return (
                 <div key={phase}>

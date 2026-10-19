@@ -206,7 +206,9 @@ describe('PluginConsentDialog', () => {
           {
             id: 'omarchy',
             name: 'Omarchy box',
-            commands: [],
+            commands: [
+              { phase: 'create', command: '"ssh" "-o" "BatchMode=yes" "omarchy" "orca sandbox"' }
+            ],
             machineProviderCommand: ['ssh', '-o', 'BatchMode=yes', 'omarchy', 'orca sandbox']
           }
         ]

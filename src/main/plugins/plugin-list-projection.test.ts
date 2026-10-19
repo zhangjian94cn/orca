@@ -186,7 +186,12 @@ describe('buildPluginList consent identity', () => {
           { phase: 'destroy', command: 'none' }
         ]
       },
-      { id: 'omarchy', name: 'Omarchy', commands: [], machineProviderCommand: ['ssh', 'omarchy'] }
+      {
+        id: 'omarchy',
+        name: 'Omarchy',
+        commands: [{ phase: 'create', command: '"ssh" "omarchy"' }],
+        machineProviderCommand: ['ssh', 'omarchy']
+      }
     ])
   })
 
