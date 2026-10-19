@@ -4,7 +4,8 @@ import type {
   MachineProviderKey,
   MachineTarget
 } from '../../shared/machine-inventory'
-import { MachineProviderError, type MachineLifetime } from '../../shared/machine-provider-protocol'
+import type { MachineLifetime } from '../../shared/machine-provider-protocol'
+import { MACHINES_DISABLED, toMachineActionResult } from '../machines/machine-action-result'
 import { createDesktopMachineService } from '../machines/desktop-machine-service'
 import type { Store } from '../persistence'
 import type { PluginService } from '../plugins/plugin-service'
@@ -27,19 +28,8 @@ function isEnabled(store: Store): boolean {
 }
 
 /** Every action is refused while the experimental flag is off, so nothing runs a provider. */
-async function act<T>(store: Store, action: () => Promise<T> | T): Promise<MachineActionResult<T>> {
-  if (!isEnabled(store)) {
-    return { ok: false, code: 'unsupported', message: 'Machines are not enabled.' }
-  }
-  try {
-    return { ok: true, value: await action() }
-  } catch (error) {
-    return {
-      ok: false,
-      code: error instanceof MachineProviderError ? error.code : 'unavailable',
-      message: error instanceof Error ? error.message : String(error)
-    }
-  }
+function act<T>(store: Store, action: () => Promise<T> | T): Promise<MachineActionResult<T>> {
+  return isEnabled(store) ? toMachineActionResult(action) : Promise.resolve(MACHINES_DISABLED)
 }
 
 export function registerMachineHandlers(store: Store, pluginService?: PluginService): void {
@@ -93,7 +83,7 @@ export function registerMachineHandlers(store: Store, pluginService?: PluginServ
       )
   )
   ipcMain.handle('machines:cancelCreate', (_event, args: { operationId: string }) =>
-    service.cancelCreate(args.operationId)
+    act(store, () => service.cancelCreate(args.operationId))
   )
   ipcMain.handle(
     'machines:sleep',

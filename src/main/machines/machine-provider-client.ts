@@ -12,7 +12,6 @@ import type {
   MachineProviderKey,
   MachineProviderSnapshot
 } from '../../shared/machine-inventory'
-import { redactPairingCode } from './machine-inventory-records'
 import { readMachineInventoryStore, writeMachineInventoryStore } from './machine-inventory-store'
 import { runMachineProviderVerb, type MachineProviderSource } from './machine-provider-process'
 
@@ -40,10 +39,13 @@ export type MachineProviderCallArgs = {
 /** Runs provider verbs with the stored account context and owns the persisted inventory. */
 export class MachineProviderClient {
   private readonly store: MachineInventoryStore
+  private readonly writable: boolean
   private readonly capabilitiesChecked = new Set<string>()
 
   constructor(private readonly deps: MachineProviderClientDeps) {
-    this.store = readMachineInventoryStore(deps.userDataPath)
+    const loaded = readMachineInventoryStore(deps.userDataPath)
+    this.store = loaded.store
+    this.writable = loaded.writable
   }
 
   providers(): readonly MachineProviderEntry[] {
@@ -71,7 +73,9 @@ export class MachineProviderClient {
   /** Applies a change to one provider's inventory, persists, and publishes its snapshot. */
   commit<T>(provider: MachineProviderEntry, change: (inventory: MachineProviderInventory) => T): T {
     const result = change(this.inventory(provider.providerKey))
-    writeMachineInventoryStore(this.deps.userDataPath, this.store)
+    if (this.writable) {
+      writeMachineInventoryStore(this.deps.userDataPath, this.store)
+    }
     this.deps.onChanged?.(this.snapshot(provider))
     return result
   }
@@ -82,7 +86,7 @@ export class MachineProviderClient {
       ...inventory,
       providerKey: provider.providerKey,
       name: provider.name,
-      machines: inventory.machines.map(redactPairingCode)
+      machines: [...inventory.machines]
     }
   }
 
@@ -151,16 +155,28 @@ export class MachineProviderClient {
     args: MachineProviderCallArgs,
     contextId: string | undefined
   ): Promise<MachineProviderSuccess> {
-    const response = await (this.deps.runVerb ?? runMachineProviderVerb)({
-      source: provider.source,
-      verb,
-      operationId: args.operationId ?? randomUUID(),
-      cwd: this.deps.userDataPath,
-      ...(args.machineId !== undefined ? { machineId: args.machineId } : {}),
-      ...(contextId !== undefined ? { contextId } : {}),
-      ...(args.params ? { params: args.params } : {}),
-      ...(args.signal ? { signal: args.signal } : {})
-    })
+    let response: MachineProviderSuccess
+    try {
+      response = await (this.deps.runVerb ?? runMachineProviderVerb)({
+        source: provider.source,
+        verb,
+        operationId: args.operationId ?? randomUUID(),
+        cwd: this.deps.userDataPath,
+        ...(args.machineId !== undefined ? { machineId: args.machineId } : {}),
+        ...(contextId !== undefined ? { contextId } : {}),
+        ...(args.params ? { params: args.params } : {}),
+        ...(args.signal ? { signal: args.signal } : {})
+      })
+    } catch (error) {
+      // A sign-in change is exactly when the account must be asked again.
+      if (
+        error instanceof MachineProviderError &&
+        (error.code === 'context-mismatch' || error.code === 'auth-required')
+      ) {
+        this.capabilitiesChecked.delete(provider.providerKey)
+      }
+      throw error
+    }
     const providerNow = Date.parse(response.now)
     if (!Number.isNaN(providerNow)) {
       this.inventory(provider.providerKey).clockOffsetMs = providerNow - this.now()

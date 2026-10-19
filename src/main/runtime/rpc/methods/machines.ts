@@ -3,6 +3,7 @@ import type {
   MachineProviderSnapshot
 } from '../../../../shared/machine-inventory'
 import { MachineProviderError } from '../../../../shared/machine-provider-protocol'
+import { MACHINES_DISABLED, toMachineActionResult } from '../../../machines/machine-action-result'
 import { MachineSelector, MachinesList } from '../../../../shared/rpc-contract/machine-params'
 import { getMachineService } from '../../../machines/desktop-machine-service'
 import type { MachineService } from '../../../machines/machine-service'
@@ -12,22 +13,9 @@ import { defineMethod, type RpcContext } from '../core'
 const LIST_MAX_AGE_MS = 30_000
 
 // Create, archive and delete spend money or destroy data, so they stay desktop-local IPC.
-async function run<T>(
-  action: (service: MachineService) => Promise<T>
-): Promise<MachineActionResult<T>> {
+function run<T>(action: (service: MachineService) => Promise<T>): Promise<MachineActionResult<T>> {
   const service = getMachineService()
-  if (!service) {
-    return { ok: false, code: 'unsupported', message: 'This Orca host has no machine providers.' }
-  }
-  try {
-    return { ok: true, value: await action(service) }
-  } catch (error) {
-    return {
-      ok: false,
-      code: error instanceof MachineProviderError ? error.code : 'unavailable',
-      message: error instanceof Error ? error.message : String(error)
-    }
-  }
+  return service ? toMachineActionResult(() => action(service)) : Promise.resolve(MACHINES_DISABLED)
 }
 
 function callerLabel(ctx: RpcContext): string {

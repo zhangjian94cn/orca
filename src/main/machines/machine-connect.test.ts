@@ -11,6 +11,7 @@ import {
   type MachinePairing,
   type MachineSshTargets
 } from './machine-connect'
+import { pairingCodeSha256 } from './machine-inventory-records'
 
 vi.mock('../ssh/config/ssh-config-parser', () => ({
   loadUserSshConfig: () => [],
@@ -189,7 +190,7 @@ describe('connectMachineOrcaServer', () => {
         fake,
         bound,
         { kind: 'orca-server', pairingCode: code, projectRoot: '/w' },
-        code
+        pairingCodeSha256(code)
       )
     ).resolves.toEqual({ runtimeEnvironmentId: 'env-new' })
     expect(fake.repair).not.toHaveBeenCalled()
@@ -199,7 +200,7 @@ describe('connectMachineOrcaServer', () => {
         fake,
         bound,
         { kind: 'orca-server', pairingCode: offer('sandbox2.example.com'), projectRoot: '/w' },
-        code
+        pairingCodeSha256(code)
       )
     ).rejects.toThrow("This machine's Orca server identity changed.")
     expect(fake.repair).toHaveBeenCalledWith(expect.objectContaining({ selector: 'env-new' }))

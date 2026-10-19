@@ -20,6 +20,8 @@ export type MachineRecord = Omit<ProviderMachine, 'state'> & {
   lastError?: string
   sshTargetId?: string
   runtimeEnvironmentId?: string
+  /** Pairing codes are credentials: rows keep `access.pairingCode` empty and store only this. */
+  pairingCodeSha256?: string
 }
 
 export type MachinePendingCreate = {

@@ -25,7 +25,7 @@ export type MachinesApi = {
     ttlSeconds?: number
     image?: string
   }) => Promise<MachineActionResult<MachineRecord>>
-  cancelCreate: (args: { operationId: string }) => Promise<boolean>
+  cancelCreate: (args: { operationId: string }) => Promise<MachineActionResult<boolean>>
   sleep: (args: MachineTarget) => Promise<MachineActionResult<MachineRecord>>
   wake: (args: MachineTarget) => Promise<MachineActionResult<MachineRecord>>
   archive: (args: MachineTarget) => Promise<MachineActionResult<MachineRecord>>

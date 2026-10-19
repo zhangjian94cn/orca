@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto'
 import { MachineProviderError, type ProviderMachine } from '../../shared/machine-provider-protocol'
-import type {
-  MachineProviderFailure,
-  MachineProviderInventory,
-  MachineProviderKey,
-  MachineRecord
+import {
+  isStalePendingCreate,
+  type MachineProviderFailure,
+  type MachineProviderInventory,
+  type MachineProviderKey,
+  type MachineRecord
 } from '../../shared/machine-inventory'
 
 export function findRecord(
@@ -45,8 +47,17 @@ export function applyMachine(
   const existing = findRecord(inventory, machine.id)
   // Providers may stop reporting the create key once running; keep it for reconcile.
   const creatingOperationId = machine.creatingOperationId ?? existing?.creatingOperationId
+  const { access, ...rest } = machine
   const record: MachineRecord = {
-    ...machine,
+    ...rest,
+    ...(access?.kind === 'orca-server'
+      ? {
+          access: { ...access, pairingCode: '' },
+          pairingCodeSha256: pairingCodeSha256(access.pairingCode)
+        }
+      : access
+        ? { access }
+        : {}),
     providerKey,
     lastSeenAt: now,
     ...(creatingOperationId ? { creatingOperationId } : {}),
@@ -80,8 +91,9 @@ export function applyInventory(
         : []
   )
   const created = new Set(inventory.machines.map((machine) => machine.creatingOperationId))
+  // Past the reconcile window, a successful list without the tag proves nothing was created.
   inventory.pendingCreates = inventory.pendingCreates.filter(
-    (pending) => !created.has(pending.operationId)
+    (pending) => !created.has(pending.operationId) && !isStalePendingCreate(pending, now)
   )
   inventory.listedAt = now
   inventory.lastFailure = undefined
@@ -109,11 +121,8 @@ export function dropPendingCreate(inventory: MachineProviderInventory, operation
   )
 }
 
-/** Pairing codes are credentials; clients only need to know the access kind. */
-export function redactPairingCode(record: MachineRecord): MachineRecord {
-  return record.access?.kind === 'orca-server'
-    ? { ...record, access: { ...record.access, pairingCode: '' } }
-    : record
+export function pairingCodeSha256(pairingCode: string): string {
+  return createHash('sha256').update(pairingCode).digest('hex')
 }
 
 export function failureOf(error: unknown, at: number): MachineProviderFailure {

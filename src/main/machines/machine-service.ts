@@ -9,19 +9,13 @@ import type {
   MachineProviderSnapshot,
   MachineRecord
 } from '../../shared/machine-inventory'
-import {
-  connectMachineOrcaServer,
-  connectMachineSsh,
-  machineSshTargetId,
-  type MachinePairing,
-  type MachineSshTargets
-} from './machine-connect'
+import { machineSshTargetId, type MachinePairing, type MachineSshTargets } from './machine-connect'
+import { MachineConnectFlow } from './machine-connect-flow'
 import { MachineCreateFlow, isUnknownOutcome, type MachineCreateParams } from './machine-create'
 import {
   applyInventory,
   applyMachine,
   failureOf,
-  findRecord,
   markGone,
   markUnreachable,
   patchRecord,
@@ -52,6 +46,7 @@ type Mutation = 'sleep' | 'wake' | 'archive' | 'delete'
 export class MachineService {
   private readonly client: MachineProviderClient
   private readonly creates: MachineCreateFlow
+  private readonly connections: MachineConnectFlow
   private readonly listFlights = new Map<string, Promise<MachineProviderSnapshot>>()
   private readonly mutationFlights = new Map<
     string,
@@ -66,6 +61,7 @@ export class MachineService {
       (providerKey) => this.list(providerKey, { force: true }),
       (ms) => this.delay(ms)
     )
+    this.connections = new MachineConnectFlow(this.client, deps, (key, id) => this.fetch(key, id))
   }
 
   /** Cached state only; never runs a provider. */
@@ -83,28 +79,27 @@ export class MachineService {
       return this.client.snapshot(provider)
     }
     const inFlight = this.listFlights.get(providerKey)
-    if (inFlight) {
+    if (inFlight && !options.force) {
       return inFlight
     }
-    const flight = this.runList(provider).finally(() => this.listFlights.delete(providerKey))
+    // A forced list must start after anything it follows (a create, a cancel), not join an older one.
+    const start = inFlight
+      ? inFlight.then(
+          () => this.runList(provider),
+          () => this.runList(provider)
+        )
+      : this.runList(provider)
+    const flight = start.finally(() => {
+      if (this.listFlights.get(providerKey) === flight) {
+        this.listFlights.delete(providerKey)
+      }
+    })
     this.listFlights.set(providerKey, flight)
     return flight
   }
 
   async get(providerKey: MachineProviderKey, machineId: string): Promise<MachineRecord> {
-    const provider = this.client.provider(providerKey)
-    try {
-      const machine = await this.client.callForMachine(provider, 'get', { machineId })
-      return this.client.commit(provider, (inventory) =>
-        applyMachine(inventory, providerKey, machine, this.client.now())
-      )
-    } catch (error) {
-      if (error instanceof MachineProviderError && error.code === 'not-found') {
-        return this.client.commit(provider, (inventory) => markGone(inventory, machineId))
-      }
-      this.client.commit(provider, (inventory) => markUnreachable(inventory, machineId, error))
-      throw error
-    }
+    return (await this.fetch(providerKey, machineId)).record
   }
 
   create(
@@ -135,41 +130,32 @@ export class MachineService {
     return this.mutate(providerKey, machineId, 'delete')
   }
 
-  async connect(providerKey: MachineProviderKey, machineId: string): Promise<MachineConnection> {
+  connect(providerKey: MachineProviderKey, machineId: string): Promise<MachineConnection> {
+    return this.connections.connect(providerKey, machineId)
+  }
+
+  /** One provider read; the raw answer carries what records never keep (pairing codes). */
+  async fetch(
+    providerKey: MachineProviderKey,
+    machineId: string
+  ): Promise<{ record: MachineRecord; machine?: ProviderMachine }> {
     const provider = this.client.provider(providerKey)
-    const previous = findRecord(this.client.inventory(providerKey), machineId)
-    const record =
-      previous?.state === 'running' && previous.access
-        ? previous
-        : await this.get(providerKey, machineId)
-    const access = record.access
-    if (record.state !== 'running' || !access) {
-      throw new MachineProviderError('unavailable', `${record.name} is ${record.state}.`)
-    }
-    const patch = (fields: Partial<MachineRecord>): void => {
-      this.client.commit(provider, (inventory) => patchRecord(inventory, machineId, fields))
-    }
+    let machine: ProviderMachine
     try {
-      if (access.kind === 'ssh') {
-        // Recorded before connecting: the target exists from here on, even if this connect fails.
-        patch({ sshTargetId: machineSshTargetId(providerKey, machineId) })
-        const result = await connectMachineSsh(this.deps.sshTargets, record, access)
-        patch({ lastError: undefined })
-        return { kind: 'ssh', ...result }
-      }
-      const result = await connectMachineOrcaServer(
-        this.deps.pairing,
-        record,
-        access,
-        previous?.access?.kind === 'orca-server' ? previous.access.pairingCode : undefined
-      )
-      patch({ runtimeEnvironmentId: result.runtimeEnvironmentId, lastError: undefined })
-      return { kind: 'orca-server', ...result }
+      machine = await this.client.callForMachine(provider, 'get', { machineId })
     } catch (error) {
-      // The target stays: worktrees are keyed to it and the next connect may succeed.
+      if (error instanceof MachineProviderError && error.code === 'not-found') {
+        return {
+          record: this.client.commit(provider, (inventory) => markGone(inventory, machineId))
+        }
+      }
       this.client.commit(provider, (inventory) => markUnreachable(inventory, machineId, error))
       throw error
     }
+    const record = this.client.commit(provider, (inventory) =>
+      applyMachine(inventory, providerKey, machine, this.client.now())
+    )
+    return { record, machine }
   }
 
   private async runList(provider: MachineProviderEntry): Promise<MachineProviderSnapshot> {
@@ -240,10 +226,10 @@ export class MachineService {
       if (!isUnknownOutcome(error)) {
         throw error
       }
-      return this.reconcile(provider, machineId, error)
+      return this.reconcile(provider, machineId, verb, error)
     }
     if (!isConfirmedMachineTransition(verb, machine.state)) {
-      return this.reconcile(provider, machineId, `${verb} reported ${machine.state}.`)
+      return this.reconcile(provider, machineId, verb, `${verb} reported ${machine.state}.`)
     }
     if (verb === 'delete') {
       return this.finishDelete(provider, machineId)
@@ -257,13 +243,18 @@ export class MachineService {
   }
 
   /** "Checking what happened": one read, never a re-run of the mutation. */
-  private reconcile(
+  private async reconcile(
     provider: MachineProviderEntry,
     machineId: string,
+    verb: Mutation,
     reason: unknown
   ): Promise<MachineRecord> {
     this.client.commit(provider, (inventory) => markUnreachable(inventory, machineId, reason))
-    return this.get(provider.providerKey, machineId)
+    const record = await this.get(provider.providerKey, machineId)
+    // A delete the read confirms still owes its cleanup.
+    return verb === 'delete' && (record.state === 'gone' || record.state === 'unknown')
+      ? this.finishDelete(provider, machineId)
+      : record
   }
 
   private async pollUntilAwake(

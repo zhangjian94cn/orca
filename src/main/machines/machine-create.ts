@@ -24,6 +24,7 @@ export type MachineCreateParams = {
  */
 export class MachineCreateFlow {
   private readonly controllers = new Map<string, AbortController>()
+  private readonly flights = new Map<string, Promise<MachineRecord>>()
 
   constructor(
     private readonly client: MachineProviderClient,
@@ -31,10 +32,27 @@ export class MachineCreateFlow {
     private readonly delay: (ms: number) => Promise<void>
   ) {}
 
-  async create(
+  /** Single-flight per operationId: a retried request joins the running create. */
+  create(
     providerKey: MachineProviderKey,
     params: MachineCreateParams,
     operationId: string = randomUUID()
+  ): Promise<MachineRecord> {
+    const inFlight = this.flights.get(operationId)
+    if (inFlight) {
+      return inFlight
+    }
+    const flight = this.run(providerKey, params, operationId).finally(() =>
+      this.flights.delete(operationId)
+    )
+    this.flights.set(operationId, flight)
+    return flight
+  }
+
+  private async run(
+    providerKey: MachineProviderKey,
+    params: MachineCreateParams,
+    operationId: string
   ): Promise<MachineRecord> {
     const provider = this.client.provider(providerKey)
     assertCreateParams(await this.client.capabilities(provider), params)

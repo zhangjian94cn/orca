@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { MachineAccess } from '../../shared/machine-provider-protocol'
 import type { MachineRecord } from '../../shared/machine-inventory'
 import { parseHostAccessLink } from '../../shared/remote-pairing-address'
+import { pairingCodeSha256 } from './machine-inventory-records'
 import type { SshConnectionState, SshTarget, SshTargetOwner } from '../../shared/ssh-types'
 
 type SshAccess = Extract<MachineAccess, { kind: 'ssh' }>
@@ -45,6 +46,14 @@ function targetFields(record: MachineRecord, access: SshAccess, id: string): Mac
       ...(access.hostKeys ? { hostKeys: access.hostKeys } : {})
     }
   }
+}
+
+/** Whether a fresh provider answer moved the machine, so a failed connect is worth one retry. */
+export function machineEndpointChanged(
+  before: MachineAccess | undefined,
+  after: MachineAccess | undefined
+): boolean {
+  return JSON.stringify(before ?? null) !== JSON.stringify(after ?? null)
 }
 
 function endpointChanged(target: SshTarget, fields: MachineTargetFields): boolean {
@@ -119,7 +128,7 @@ export async function connectMachineOrcaServer(
   pairing: MachinePairing,
   record: MachineRecord,
   access: OrcaServerAccess,
-  previousPairingCode: string | undefined
+  previousPairingCodeSha256: string | undefined
 ): Promise<{ runtimeEnvironmentId: string }> {
   const link = parseHostAccessLink(access.pairingCode)
   if (!link.ok) {
@@ -128,7 +137,10 @@ export async function connectMachineOrcaServer(
   if (link.value.endpointKind === 'loopback' || link.value.endpointKind === 'lan') {
     throw new Error(`${record.name} sent a pairing link for a local-network address.`)
   }
-  if (record.runtimeEnvironmentId && previousPairingCode === access.pairingCode) {
+  if (
+    record.runtimeEnvironmentId &&
+    previousPairingCodeSha256 === pairingCodeSha256(access.pairingCode)
+  ) {
     return { runtimeEnvironmentId: record.runtimeEnvironmentId }
   }
   const result = record.runtimeEnvironmentId
