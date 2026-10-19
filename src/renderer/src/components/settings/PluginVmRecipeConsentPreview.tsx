@@ -16,6 +16,11 @@ function lifecycleLabel(phase: VmRecipePreview['commands'][number]['phase']): st
   }
 }
 
+// Why quote every argument: argv runs without a shell, so word boundaries must be unambiguous.
+function formatArgv(argv: readonly string[]): string {
+  return argv.map((value) => JSON.stringify(value)).join(' ')
+}
+
 export function PluginVmRecipeConsentPreview({
   recipes
 }: {
@@ -44,6 +49,29 @@ export function PluginVmRecipeConsentPreview({
             ) : null}
           </div>
           <dl className="space-y-2">
+            {recipe.machineProviderCommand ? (
+              <div>
+                <dt className="mb-1 text-xs text-muted-foreground">
+                  {translate(
+                    'auto.components.settings.PluginVmRecipeConsentPreview.machineProvider',
+                    'Machine provider · Orca appends <verb> --json [--id <machine>]'
+                  )}
+                </dt>
+                <dd>
+                  <pre
+                    tabIndex={0}
+                    aria-label={translate(
+                      'auto.components.settings.PluginVmRecipeConsentPreview.machineProviderLabel',
+                      '{{value0}} · machine provider command',
+                      { value0: recipe.name }
+                    )}
+                    className="max-h-40 overflow-auto scrollbar-sleek whitespace-pre-wrap break-all rounded-md bg-muted px-2.5 py-2 font-mono text-xs leading-5 text-foreground"
+                  >
+                    {formatArgv(recipe.machineProviderCommand)}
+                  </pre>
+                </dd>
+              </div>
+            ) : null}
             {recipe.commands.map(({ phase, command }) => {
               const phaseLabel = lifecycleLabel(phase)
               return (

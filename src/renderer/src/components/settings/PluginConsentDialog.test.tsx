@@ -196,6 +196,31 @@ describe('PluginConsentDialog', () => {
     expect(commands[0]?.getAttribute('aria-label')).toBe('Cloud Sandbox · Create command')
   })
 
+  it('shows a machine provider argv with unambiguous word boundaries', async () => {
+    await renderConsent(
+      {
+        ...plugin,
+        hasWorker: false,
+        capabilities: [],
+        vmRecipes: [
+          {
+            id: 'omarchy',
+            name: 'Omarchy box',
+            commands: [],
+            machineProviderCommand: ['ssh', '-o', 'BatchMode=yes', 'omarchy', 'orca sandbox']
+          }
+        ]
+      },
+      vi.fn().mockResolvedValue(undefined)
+    )
+
+    const commands = Array.from(document.querySelectorAll('pre'))
+    expect(commands).toHaveLength(1)
+    expect(commands[0]?.textContent).toBe('"ssh" "-o" "BatchMode=yes" "omarchy" "orca sandbox"')
+    expect(commands[0]?.getAttribute('aria-label')).toBe('Omarchy box · machine provider command')
+    expect(document.body.textContent).toContain('Orca appends <verb> --json [--id <machine>]')
+  })
+
   it('shows plugin shortcuts and names built-in chords they replace', async () => {
     await renderConsent(
       {

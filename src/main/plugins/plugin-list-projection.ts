@@ -185,12 +185,23 @@ export async function buildPluginList(
           keybindings: command.keybindings
         })),
         hasWorker: Boolean(plugin.manifest.main),
-        vmRecipes: service.contentPacks.vmRecipes.preview(plugin.pluginKey).map(({ recipe }) => ({
-          id: recipe.id,
-          name: recipe.name,
-          ...(recipe.description ? { description: recipe.description } : {}),
-          commands: listPluginVmRecipeCommands(recipe)
-        })),
+        vmRecipes: [
+          ...service.contentPacks.vmRecipes.preview(plugin.pluginKey).map(({ recipe }) => ({
+            id: recipe.id,
+            name: recipe.name,
+            ...(recipe.description ? { description: recipe.description } : {}),
+            commands: listPluginVmRecipeCommands(recipe)
+          })),
+          ...service.contentPacks.vmRecipes
+            .previewMachineProviders(plugin.pluginKey)
+            .map(({ provider }) => ({
+              id: provider.id,
+              name: provider.name,
+              ...(provider.description ? { description: provider.description } : {}),
+              commands: [],
+              machineProviderCommand: provider.command
+            }))
+        ],
         restarts: worker.restarts,
         ...(killListEntry
           ? {
